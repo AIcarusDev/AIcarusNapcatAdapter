@@ -12,6 +12,8 @@ from aicarus_protocols import Event, EventBuilder, Seg, find_seg_by_type
 # 哼哼，从我们重构好的新世界里导入！
 from .action_definitions import ACTION_MAPPING, COMPLEX_ACTION_HANDLERS
 
+from .action_register import pending_actions
+
 # 内部模块
 from .logger import logger
 from .message_queue import get_napcat_api_response
@@ -326,6 +328,16 @@ class SendHandlerAicarus:
 
         if response and response.get("status") == "ok":
             sent_message_id = str(response.get("data", {}).get("message_id", ""))
+
+            # 我们将 Core 的 action_id 和 Napcat 的 message_id 关联起来
+            # 这样可以在后续的回声确认中使用
+            if sent_message_id and aicarus_event.event_id:
+                pending_actions[sent_message_id] = aicarus_event.event_id
+                logger.info(
+                    f"动作 '{aicarus_event.event_id}' 已发送，"
+                    f"其平台 message_id '{sent_message_id}' 已登记，等待回声确认。"
+                )
+
             return True, "成功发送", {"sent_message_id": sent_message_id}
         else:
             err_msg = (

@@ -86,8 +86,8 @@ class CoreConnectionClient:
                             "lifecycle_type": "connect",
                             "details": {
                                 "adapter_id": adapter_id_for_registration,
-                                "display_name": "Napcat QQ Adapter",
-                                "adapter_platform": "napcat",
+                                "display_name": "腾讯QQ",
+                                "adapter_platform": "qq",
                                 "adapter_version": "2.0.0",  # 版本号也更新一下
                                 "protocol_version": PROTOCOL_VERSION,
                             },

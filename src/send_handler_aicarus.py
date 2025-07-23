@@ -11,7 +11,6 @@ from aicarus_protocols import Event, EventBuilder, Seg, find_seg_by_type
 
 # 哼哼，从我们重构好的新世界里导入！
 from .action_definitions import ACTION_MAPPING, COMPLEX_ACTION_HANDLERS
-
 from .action_register import pending_actions
 
 # 内部模块

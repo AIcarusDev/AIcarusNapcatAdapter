@@ -9,13 +9,13 @@ port = 8078      # Adapter 监听来自 Napcat 客户端连接的端口。
 
 [core_connection]
 url = "ws://127.0.0.1:8077/ws"  # 你的 AIcarus Core WebSocket 服务器的完整 URL。请确保 Core 服务器已启动并监听此地址。
-platform_id = "napcat_qq" # 此 Adapter 实例在 Core 处注册的唯一标识符。用于 Core 区分不同的 Adapter 连接。一般无需更改
+platform_id = "qq" # 此 Adapter 实例在 Core 处注册的唯一标识符。用于 Core 区分不同的 Adapter 连接。一般无需更改
 
 [bot_settings]
 nickname = "" # 可选：机器人的昵称。如果不需要，请将其值保留为空字符串 "" 或直接删除此行。
 # 强制指定机器人自身的QQ号。如果设置了此项，Adapter将使用此ID，不再尝试通过API从Napcat客户端获取。
 # 仅当自动获取 (通过 get_login_info API) 持续失败时使用。留空则表示自动获取。
-force_self_id = "" 
+force_self_id = ""
 napcat_heartbeat_interval_seconds = 30 # Adapter 与 Napcat 客户端之间心跳检查的间隔秒数 (如果 Adapter 需要实现此逻辑)。
 
 # [another_section] # 示例：未来可能添加的新配置段

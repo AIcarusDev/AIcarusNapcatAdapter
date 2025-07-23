@@ -329,6 +329,13 @@ class SendHandlerAicarus:
         if response and response.get("status") == "ok":
             sent_message_id = str(response.get("data", {}).get("message_id", ""))
 
+            if not sent_message_id:
+                # 万一拿不到有效的 message_id，就直接报告失败，而不是去等待一个永远不会来的回声。
+                # 理论上不会发生这种情况。
+                err_msg = "Napcat API 响应成功，但未返回有效的 message_id。"
+                logger.warning(f"动作 '{aicarus_event.event_id}' 失败: {err_msg}")
+                return False, err_msg, {}
+
             # 我们将 Core 的 action_id 和 Napcat 的 message_id 关联起来
             # 这样可以在后续的回声确认中使用
             if sent_message_id and aicarus_event.event_id:

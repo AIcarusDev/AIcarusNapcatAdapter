@@ -69,10 +69,22 @@ class MessageEventFactory(BaseEventFactory):
                         )
                     )
             elif napcat_sub_type == MessageType.Private.group:
-                temp_group_id = str(napcat_event.get("group_id", "")).strip()
-                if temp_group_id and temp_group_id != "0":
-                    aicarus_conversation_info = (
-                        await recv_handler._napcat_to_aicarus_conversationinfo(temp_group_id)
+                source_group_id = str(napcat_event.get("group_id", "")).strip()
+                sender_user_id = str(napcat_sender.get("user_id", "")).strip()
+
+                if source_group_id and sender_user_id:
+                    # 1. 构造一个唯一的、可识别的临时会话ID
+                    temp_conv_id = f"{sender_user_id}.from.{source_group_id}"
+
+                    # 2. 创建 ConversationInfo，类型是 private，但附带特殊元数据
+                    aicarus_conversation_info = ConversationInfo(
+                        conversation_id=temp_conv_id,
+                        type="private",  # 本质是私聊
+                        name=aicarus_user_info.user_nickname, # 会话名就是对方的昵称
+                        extra={ # 使用 extra 字段来传递上下文
+                            "is_temporary": True,
+                            "source_group_id": source_group_id
+                        }
                     )
                 else:
                     logger.warning(f"临时会话事件 {napcat_message_id} 缺少有效的 group_id。")

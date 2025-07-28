@@ -310,10 +310,32 @@ class SendHandlerAicarus:
                     {"group_id": int(target_group_id), "message": napcat_segments},
                 )
             elif target_user_id:
-                napcat_action, params = (
-                    "send_private_msg",
-                    {"user_id": int(target_user_id), "message": napcat_segments},
-                )
+                # 检查是否为临时会话ID (格式: "用户ID.from.群ID")
+                if ".from." in target_user_id:
+                    logger.info(f"检测到临时会话ID: {target_user_id}，正在解析...")
+                    parts = target_user_id.split(".from.")
+                    if len(parts) == 2:
+                        real_user_id, source_group_id = parts
+                        # Napcat 发送临时会话消息也使用 send_private_msg,
+                        # 但通常需要同时提供 user_id 和 group_id。
+                        # 我们将解析出的两个ID都传进去。
+                        params = {
+                            "user_id": int(real_user_id),
+                            "group_id": int(source_group_id),
+                            "message": napcat_segments,
+                        }
+                        napcat_action = "send_private_msg"
+                        logger.info(f"解析成功, real_user_id: {real_user_id}, source_group_id: {source_group_id}")
+                    else:
+                        # 如果格式不正确，则返回错误
+                        return False, f"临时会话ID格式错误: {target_user_id}", {}
+                else:
+                    # 如果不是临时会话，则按原逻辑处理
+                    params = {
+                        "user_id": int(target_user_id),
+                        "message": napcat_segments,
+                    }
+                    napcat_action = "send_private_msg"
             else:
                 return False, "没有找到发送目标", {}
         except (ValueError, TypeError):

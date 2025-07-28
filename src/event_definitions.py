@@ -80,11 +80,11 @@ class MessageEventFactory(BaseEventFactory):
                     aicarus_conversation_info = ConversationInfo(
                         conversation_id=temp_conv_id,
                         type="private",  # 本质是私聊
-                        name=aicarus_user_info.user_nickname, # 会话名就是对方的昵称
-                        extra={ # 使用 extra 字段来传递上下文
+                        name=aicarus_user_info.user_nickname,  # 会话名就是对方的昵称
+                        extra={  # 使用 extra 字段来传递上下文
                             "is_temporary": True,
-                            "source_group_id": source_group_id
-                        }
+                            "source_group_id": source_group_id,
+                        },
                     )
                 else:
                     logger.warning(f"临时会话事件 {napcat_message_id} 缺少有效的 group_id。")

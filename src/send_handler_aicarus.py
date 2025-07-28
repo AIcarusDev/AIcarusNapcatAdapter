@@ -325,7 +325,10 @@ class SendHandlerAicarus:
                             "message": napcat_segments,
                         }
                         napcat_action = "send_private_msg"
-                        logger.info(f"解析成功, real_user_id: {real_user_id}, source_group_id: {source_group_id}")
+                        logger.info(
+                            f"解析成功, real_user_id: {real_user_id}, "
+                            f"source_group_id: {source_group_id}"
+                        )
                     else:
                         # 如果格式不正确，则返回错误
                         return False, f"临时会话ID格式错误: {target_user_id}", {}

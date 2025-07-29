@@ -222,6 +222,8 @@ ActionMappingType = tuple[Callable[..., Awaitable[dict[str, Any] | None]], list[
 
 # 动作的“圣殿”，记载了所有神权（API）的咒语和贡品（必需参数）
 ACTION_MAPPING: dict[str, ActionMappingType] = {
+    # --- 好友操作 ---
+    "delete_friend": (utils.napcat_delete_friend, ["user_id"]),
     # --- 群组管理 ---
     "kick_member": (utils.napcat_set_group_kick, ["group_id", "user_id"]),
     "ban_member": (utils.napcat_set_group_ban, ["group_id", "user_id"]),

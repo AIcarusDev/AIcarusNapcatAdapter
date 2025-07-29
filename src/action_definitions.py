@@ -236,7 +236,7 @@ ACTION_MAPPING: dict[str, ActionMappingType] = {
     "set_conversation_name": (utils.napcat_set_group_name, ["group_id", "group_name"]),
     # --- 消息操作 ---
     "recall_message": (utils.napcat_delete_msg, ["message_id"]),
-    "poke_user": (utils.napcat_send_poke, ["user_id"]),  # poke现在统一了
+    "poke_user": (utils.napcat_send_poke, ["target_user_id"]),  # poke现在统一了
     "set_message_emoji_like": (
         utils.napcat_set_msg_emoji_like,
         ["message_id", "emoji_id"],

@@ -211,7 +211,7 @@ async def napcat_delete_msg(server_connection: Any, **kwargs: Any) -> dict[str, 
 
 async def napcat_send_poke(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """统一的戳一戳入口."""
-    params: dict[str, Any] = {"user_id": int(kwargs["user_id"])}
+    params: dict[str, Any] = {"user_id": int(kwargs["target_user_id"])}
     action = "friend_poke"
     if kwargs.get("group_id"):
         params["group_id"] = int(kwargs["group_id"])

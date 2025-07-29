@@ -11,6 +11,7 @@ from aicarus_protocols import (
     Event,
     Seg,
     UserInfo,
+    EventBuilder
 )
 
 from .config import get_config
@@ -19,7 +20,7 @@ from .napcat_definitions import MessageType, MetaEventType, NoticeType
 
 if TYPE_CHECKING:
     from .recv_handler_aicarus import RecvHandlerAicarus
-
+from .action_register import pending_actions
 
 # --- 定义各种事件的构造工厂 ---
 class BaseEventFactory(ABC):
@@ -542,9 +543,6 @@ class MessageEventHandlerWithSelfCheck(GenericEventHandler):
 
     async def execute(self, event_data: dict[str, Any], recv_handler: "RecvHandlerAicarus") -> None:
         """处理消息事件，并检查是否为自我上报的确认消息."""
-        from aicarus_protocols import EventBuilder  # 确保导入
-
-        from .action_register import pending_actions
 
         napcat_user_id = str(event_data.get("user_id", ""))
 
@@ -584,7 +582,7 @@ class MessageEventHandlerWithSelfCheck(GenericEventHandler):
                     data={"confirmed_message_id": napcat_message_id},
                 )
                 await recv_handler.dispatch_to_core(response_event)
-                return
+                # 不返回，让消息继续被处理
 
         await super().execute(event_data, recv_handler)
 

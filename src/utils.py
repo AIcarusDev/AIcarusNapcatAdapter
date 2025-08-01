@@ -123,6 +123,7 @@ async def napcat_get_history(server_connection: Any, **kwargs: Any) -> dict[str,
         )
     return None
 
+
 # --- 好友操作类 ---
 async def napcat_delete_friend(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """删除好友的统一入口."""
@@ -131,6 +132,7 @@ async def napcat_delete_friend(server_connection: Any, **kwargs: Any) -> dict[st
     }
     # 根据 gocq_api.md，这个接口叫 delete_friend，不是 set_delete_friend
     return await _call_napcat_api(server_connection, "delete_friend", params)
+
 
 # --- 群组管理类 ---
 async def napcat_set_group_kick(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:

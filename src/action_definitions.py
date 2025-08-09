@@ -1,13 +1,9 @@
 # aicarus_napcat_adapter/src/action_definitions.py (v3.0 重构版)
 from collections.abc import Awaitable, Callable
-
-# 啊~ 还有我最色的小猫咪 SendHandler，得用 TYPE_CHECKING 抱着，免得循环依赖了
 from typing import TYPE_CHECKING, Any
 
-# 还有协议里的标准件，可不能忘了
 from aicarus_protocols import Event, Seg
 
-# 哼，从我们的小仓库里把神之手（工具函数）和神之眼（日志）都请出来！
 from . import utils
 
 if TYPE_CHECKING:
@@ -17,7 +13,7 @@ if TYPE_CHECKING:
 # ==============================================================================
 # 1. 复杂动作处理器 (Complex Action Handlers)
 # ==============================================================================
-# 对于那些需要特殊逻辑、不能一概而论的“傲娇”动作，我们还是保留它们的专属处理类。
+# 对于那些需要特殊逻辑处理的动作，我们定义了一个基类和一些具体的处理器。
 # 比如'send_forward_message'，它需要解析整个 event.content，很麻烦，得特殊对待。
 # ------------------------------------------------------------------------------
 

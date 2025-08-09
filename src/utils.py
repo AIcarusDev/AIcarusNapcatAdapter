@@ -1,13 +1,17 @@
 # aicarus_napcat_adapter/src/utils.py
 # Adapter 项目专属的工具函数，现在是名副其实的“神之手”工具箱！
+import asyncio
 import base64
 import json
+import os
 import ssl
+import tempfile
 import uuid
 from typing import Any
 
 import aiohttp
 from aicarus_protocols import ConversationType  # 导入会话类型常量
+from moviepy import VideoFileClip
 
 from .logger import logger
 from .message_queue import get_napcat_api_response
@@ -453,3 +457,70 @@ async def get_image_base64_from_url(url: str, timeout: int = 10) -> str | None:
     except Exception as e:
         logger.error(f"下载或处理图片时发生错误 (URL: {url}): {e}", exc_info=True)
         return None
+
+async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> str | None:
+    """下载文件到临时目录并返回路径."""
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                # 创建一个带 .gif 后缀的临时文件
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as temp_file:
+                    temp_file.write(await response.read())
+                    return temp_file.name
+    except Exception as e:
+        logger.error(f"下载 GIF 文件失败: {url}, 错误: {e}", exc_info=True)
+    return None
+
+async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
+    """下载GIF，转换为压缩的MP4，并返回Base64编码."""
+    logger.info(f"开始处理GIF转换任务, URL: {gif_url}")
+    temp_gif_path = None
+    temp_mp4_path = None
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+
+    try:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context)
+        ) as session:
+            temp_gif_path = await _download_file_to_temp(gif_url, session)
+            if not temp_gif_path:
+                return None
+
+            # 使用 to_thread 运行同步的、阻塞的 moviepy 代码
+            def convert_sync() -> None:
+                # 创建一个临时文件路径用于输出 MP4
+                nonlocal temp_mp4_path
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
+                    temp_mp4_path = temp_f.name
+
+                # moviepy 核心转换逻辑
+                clip = VideoFileClip(temp_gif_path)
+                # 压缩参数：codec, an=None(去除音频), a low bitrate
+                clip.write_videofile(
+                    temp_mp4_path,
+                    codec="libx264",
+                    audio=False,
+                    bitrate="500k",
+                    logger=None
+                )
+                clip.close()
+
+            await asyncio.to_thread(convert_sync)
+
+            if temp_mp4_path and os.path.exists(temp_mp4_path):
+                with open(temp_mp4_path, "rb") as mp4_file:
+                    mp4_bytes = mp4_file.read()
+                logger.success(f"GIF 成功转换为 MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
+                return base64.b64encode(mp4_bytes).decode("utf-8")
+
+    except Exception as e:
+        logger.error(f"GIF 到 MP4 转换过程中发生严重错误: {e}", exc_info=True)
+        return None
+    finally:
+        # 清理临时文件
+        if temp_gif_path and os.path.exists(temp_gif_path):
+            os.remove(temp_gif_path)
+        if temp_mp4_path and os.path.exists(temp_mp4_path):
+            os.remove(temp_mp4_path)

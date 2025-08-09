@@ -17,6 +17,7 @@ from .logger import logger
 from .napcat_definitions import NapcatSegType
 from .qq_emoji_list import qq_face
 from .utils import (
+    convert_gif_to_mp4_base64,
     get_image_base64_from_url,
     napcat_get_forward_msg_content,
     napcat_get_group_info,
@@ -171,9 +172,11 @@ class RecvHandlerAicarus:
         )
 
     async def _napcat_to_aicarus_seglist(
-        self, napcat_segments: list[dict[str, Any]], napcat_event: dict
+        self,
+        napcat_segments: list[dict[str, Any]],
+        napcat_event: dict
     ) -> list[Seg]:
-        """把Napcat的消息段转换成AICarus能理解的格式."""
+        """把Napcat的消息段转换成AICarus能理解的格式。."""
         aicarus_segs: list[Seg] = []
         for seg in napcat_segments:
             seg_type = seg.get("type")
@@ -190,27 +193,59 @@ class RecvHandlerAicarus:
 
             elif seg_type == NapcatSegType.image:
                 image_url = seg_data.get("url")
-                image_base64 = None
-                if image_url:
-                    try:
-                        # 开始下载图片转成base64，可能会有点慢
-                        image_base64 = await get_image_base64_from_url(image_url)
-                    except Exception as e:
-                        logger.error(f"处理图片时发生错误: {e}")
-                if seg_data.get("summary", "[图片]") == "[动画表情]":
-                    # 如果是动画表情，就用特殊的标记
-                    summary = "sticker"
-                else:
-                    summary = "image"
-                aicarus_s = Seg(
-                    type="image",
-                    data={
-                        "url": image_url,
-                        "file_id": seg_data.get("file"),
-                        "base64": image_base64,
-                        "summary": summary,
-                    },
+                file_id = seg_data.get("file") # Napcat 中 file 字段通常是文件ID或路径
+
+                # 双重校验：首先检查 summary 是否为 [动画表情]，然后再校验文件扩展名
+                is_potential_gif = seg_data.get("summary", "[图片]") == "[动画表情]"
+                is_confirmed_gif = (
+                    image_url and image_url.lower().endswith('.gif')
+                    ) or (
+                    file_id and isinstance(
+                        file_id,
+                        str
+                    ) and file_id.lower().endswith('.gif')
                 )
+
+                if is_potential_gif and is_confirmed_gif and image_url:
+                    # 只有确认是 GIF 才进行转换
+                    mp4_base64 = await convert_gif_to_mp4_base64(image_url)
+                    if mp4_base64:
+                        # 转换成功，封装成 video 消息段
+                        aicarus_s = Seg(
+                            type="video",
+                            data={
+                                "summary": "animated_sticker",
+                                "base64": mp4_base64,
+                                "mime_type": "video/mp4",
+                                "file_id": file_id, # 保留原始文件ID
+                            },
+                        )
+                        logger.info(f"成功将 GIF 动画表情 {file_id} 转换为视频段。")
+                    else:
+                        # 转换失败，降级为普通文本
+                        logger.warning(f"GIF 动画表情 {file_id} 转换失败，降级为文本。")
+                        aicarus_s = Seg(type="text", data={"text": "[动画表情(处理失败)]"})
+
+                else: # --- 如果不是 GIF (包括被误判为[动画表情]的静态图)，走原来的静态图片逻辑 ---
+                    image_base64 = None
+                    if image_url:
+                        try:
+                            image_base64 = await get_image_base64_from_url(image_url)
+                        except Exception as e:
+                            logger.error(f"处理静态图片时发生错误: {e}")
+
+                    # 即使 summary 是 [动画表情]，但它不是GIF，我们把它当作普通图片 sticker
+                    summary = "sticker" if is_potential_gif else "image"
+
+                    aicarus_s = Seg(
+                        type="image",
+                        data={
+                            "url": image_url,
+                            "file_id": file_id,
+                            "base64": image_base64,
+                            "summary": summary,
+                        },
+                    )
 
             elif seg_type == NapcatSegType.at:
                 qq_num = seg_data.get("qq")

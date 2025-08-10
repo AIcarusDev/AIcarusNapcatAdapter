@@ -10,8 +10,10 @@ import uuid
 from typing import Any
 
 import aiohttp
+import numpy as np
 from aicarus_protocols import ConversationType  # 导入会话类型常量
-from moviepy import VideoFileClip
+from moviepy import ImageSequenceClip
+from PIL import Image
 
 from .logger import logger
 from .message_queue import get_napcat_api_response
@@ -464,12 +466,12 @@ async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> st
     try:
         async with session.get(url) as response:
             if response.status == 200:
-                # 创建一个带 .gif 后缀的临时文件
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as temp_file:
+                # 注意：这里不再强制指定 .gif 后缀，让系统自动处理
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
                     temp_file.write(await response.read())
                     return temp_file.name
     except Exception as e:
-        logger.error(f"下载 GIF 文件失败: {url}, 错误: {e}", exc_info=True)
+        logger.error(f"下载动图文件失败: {url}, 错误: {e}", exc_info=True)
     return None
 
 
@@ -502,9 +504,12 @@ async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
         return None
 
 async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
-    """下载GIF，转换为压缩的MP4，并返回Base64编码."""
-    logger.info(f"开始处理GIF转换任务, URL: {gif_url}")
-    temp_gif_path = None
+    """下载动图 (GIF, APNG, WebP等)，使用Pillow逐帧解析.
+
+    再用moviepy合成为压缩的MP4，并返回Base64编码。
+    """
+    logger.info(f"开始处理动图转换任务, URL: {gif_url}")
+    temp_image_path = None
     temp_mp4_path = None
 
     ssl_context = ssl.create_default_context()
@@ -514,20 +519,52 @@ async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl_context)
         ) as session:
-            temp_gif_path = await _download_file_to_temp(gif_url, session)
-            if not temp_gif_path:
+            temp_image_path = await _download_file_to_temp(gif_url, session)
+            if not temp_image_path:
                 return None
 
-            # 使用 to_thread 运行同步的、阻塞的 moviepy 代码
+            # 使用 to_thread 运行同步的、阻塞的 Pillow 和 moviepy 代码
             def convert_sync() -> None:
-                # 创建一个临时文件路径用于输出 MP4
                 nonlocal temp_mp4_path
+                frames = []
+                try:
+                    # 1. 使用 Pillow 打开下载的动图文件
+                    with Image.open(temp_image_path) as im:
+                        # 2. 逐帧读取图像
+                        while True:
+                            try:
+                                # 移动到下一帧
+                                im.seek(im.tell() + 1)
+                                # 3. 转换为 'RGB' 格式以确保兼容性
+                                frame = im.copy().convert("RGB")
+                                # 4. 将 Pillow 图像帧转换为 NumPy 数组
+                                frames.append(np.array(frame))
+                            except EOFError:
+                                # 已经读完所有帧
+                                break
+                except Exception as e_pil:
+                    logger.error(f"使用 Pillow 解析动图帧时失败: {e_pil}", exc_info=True)
+                    return # 如果解析失败，直接终止
+
+                if not frames:
+                    logger.warning("未能从动图文件中提取出任何帧。")
+                    return
+
+                # 5. 使用 moviepy 的 ImageSequenceClip 将帧序列合成为视频
+                # 尝试从图像信息中获取帧率，否则使用默认值 25
+                fps = 25
+                if 'duration' in locals().get('im', {}).info:
+                    duration_ms = locals()['im'].info.get('duration')
+                    if isinstance(duration_ms, int) and duration_ms > 0:
+                        fps = 1000.0 / duration_ms
+
+                clip = ImageSequenceClip(frames, fps=fps)
+
+                # 6. 创建一个临时文件路径用于输出 MP4
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
                     temp_mp4_path = temp_f.name
 
-                # moviepy 核心转换逻辑
-                clip = VideoFileClip(temp_gif_path)
-                # 压缩参数：codec, an=None(去除音频), a low bitrate
+                # 7. 将视频片段写入文件，并进行压缩
                 clip.write_videofile(
                     temp_mp4_path, codec="libx264", audio=False, bitrate="500k", logger=None
                 )
@@ -538,15 +575,18 @@ async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
             if temp_mp4_path and os.path.exists(temp_mp4_path):
                 with open(temp_mp4_path, "rb") as mp4_file:
                     mp4_bytes = mp4_file.read()
-                logger.success(f"GIF 成功转换为 MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
+                logger.success(f"动图成功转换为 MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
                 return base64.b64encode(mp4_bytes).decode("utf-8")
+            else:
+                logger.warning("同步转换过程未能成功生成 MP4 文件。")
+                return None
 
     except Exception as e:
-        logger.error(f"GIF 到 MP4 转换过程中发生严重错误: {e}", exc_info=True)
+        logger.error(f"动图到 MP4 转换过程中发生严重错误: {e}", exc_info=True)
         return None
     finally:
-        # 清理临时文件
-        if temp_gif_path and os.path.exists(temp_gif_path):
-            os.remove(temp_gif_path)
+        # 清理所有临时文件
+        if temp_image_path and os.path.exists(temp_image_path):
+            os.remove(temp_image_path)
         if temp_mp4_path and os.path.exists(temp_mp4_path):
             os.remove(temp_mp4_path)

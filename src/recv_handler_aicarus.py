@@ -172,9 +172,7 @@ class RecvHandlerAicarus:
         )
 
     async def _napcat_to_aicarus_seglist(
-        self,
-        napcat_segments: list[dict[str, Any]],
-        napcat_event: dict
+        self, napcat_segments: list[dict[str, Any]], napcat_event: dict
     ) -> list[Seg]:
         """把Napcat的消息段转换成AICarus能理解的格式。."""
         aicarus_segs: list[Seg] = []
@@ -193,17 +191,12 @@ class RecvHandlerAicarus:
 
             elif seg_type == NapcatSegType.image:
                 image_url = seg_data.get("url")
-                file_id = seg_data.get("file") # Napcat 中 file 字段通常是文件ID或路径
+                file_id = seg_data.get("file")  # Napcat 中 file 字段通常是文件ID或路径
 
                 # 双重校验：首先检查 summary 是否为 [动画表情]，然后再校验文件扩展名
                 is_potential_gif = seg_data.get("summary", "[图片]") == "[动画表情]"
-                is_confirmed_gif = (
-                    image_url and image_url.lower().endswith('.gif')
-                    ) or (
-                    file_id and isinstance(
-                        file_id,
-                        str
-                    ) and file_id.lower().endswith('.gif')
+                is_confirmed_gif = (image_url and image_url.lower().endswith(".gif")) or (
+                    file_id and isinstance(file_id, str) and file_id.lower().endswith(".gif")
                 )
 
                 if is_potential_gif and is_confirmed_gif and image_url:
@@ -217,7 +210,7 @@ class RecvHandlerAicarus:
                                 "summary": "animated_sticker",
                                 "base64": mp4_base64,
                                 "mime_type": "video/mp4",
-                                "file_id": file_id, # 保留原始文件ID
+                                "file_id": file_id,  # 保留原始文件ID
                             },
                         )
                         logger.info(f"成功将 GIF 动画表情 {file_id} 转换为视频段。")
@@ -226,7 +219,7 @@ class RecvHandlerAicarus:
                         logger.warning(f"GIF 动画表情 {file_id} 转换失败，降级为文本。")
                         aicarus_s = Seg(type="text", data={"text": "[动画表情(处理失败)]"})
 
-                else: # --- 如果不是 GIF (包括被误判为[动画表情]的静态图)，走原来的静态图片逻辑 ---
+                else:  # --- 如果不是 GIF (包括被误判为[动画表情]的静态图)，走原来的静态图片逻辑 ---
                     image_base64 = None
                     if image_url:
                         try:

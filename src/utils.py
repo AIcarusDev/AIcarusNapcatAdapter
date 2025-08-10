@@ -458,6 +458,7 @@ async def get_image_base64_from_url(url: str, timeout: int = 10) -> str | None:
         logger.error(f"下载或处理图片时发生错误 (URL: {url}): {e}", exc_info=True)
         return None
 
+
 async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> str | None:
     """下载文件到临时目录并返回路径."""
     try:
@@ -470,6 +471,7 @@ async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> st
     except Exception as e:
         logger.error(f"下载 GIF 文件失败: {url}, 错误: {e}", exc_info=True)
     return None
+
 
 async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
     """下载GIF，转换为压缩的MP4，并返回Base64编码."""
@@ -499,11 +501,7 @@ async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
                 clip = VideoFileClip(temp_gif_path)
                 # 压缩参数：codec, an=None(去除音频), a low bitrate
                 clip.write_videofile(
-                    temp_mp4_path,
-                    codec="libx264",
-                    audio=False,
-                    bitrate="500k",
-                    logger=None
+                    temp_mp4_path, codec="libx264", audio=False, bitrate="500k", logger=None
                 )
                 clip.close()
 

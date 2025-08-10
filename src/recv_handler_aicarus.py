@@ -226,7 +226,6 @@ class RecvHandlerAicarus:
                     # 出现异常时，保守地认为它是静态图
                     is_animated = False
 
-
                 if is_animated:
                     logger.info(f"检测到动图 (URL: {image_url})，尝试转换为 MP4...")
                     try:

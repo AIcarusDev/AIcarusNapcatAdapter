@@ -473,6 +473,34 @@ async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> st
     return None
 
 
+async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
+    """通过发送 HEAD 请求，高效地获取 URL 对应资源的 Content-Type."""
+    if not url:
+        return None
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+
+    try:
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context)
+        ) as session, session.head(url, timeout=timeout, allow_redirects=True) as response:
+            # 使用 HEAD 请求，只获取响应头，不下载文件体，非常高效
+            if response.status == 200:
+                content_type = response.headers.get("Content-Type")
+                if content_type:
+                    # 清理掉可能存在的 charset 等附加信息
+                    return content_type.split(';')[0].strip()
+                else:
+                    logger.warning(f"获取 Content-Type 失败 (HTTP {response.status}): {url}")
+                    return None
+    except TimeoutError:
+        logger.warning(f"获取 Content-Type 超时: {url}")
+        return None
+    except Exception as e:
+        logger.error(f"获取 Content-Type 时发生未知错误 (URL: {url}): {e}")
+        return None
+
 async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
     """下载GIF，转换为压缩的MP4，并返回Base64编码."""
     logger.info(f"开始处理GIF转换任务, URL: {gif_url}")

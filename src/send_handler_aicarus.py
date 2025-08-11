@@ -31,7 +31,6 @@ class SendHandlerAicarus:
             "reply": self._convert_reply_seg,
             "quote": self._convert_reply_seg,
             "image": self._convert_image_seg,
-            "sticker": self._convert_sticker_seg,
             "face": self._convert_face_seg,
             "record": self._convert_record_seg,
             "video": self._convert_video_seg,
@@ -48,24 +47,6 @@ class SendHandlerAicarus:
             "type": NapcatSegType.text,
             "data": {"text": str(seg.data.get("text", ""))},
         }
-
-    def _convert_sticker_seg(self, seg: Seg) -> dict[str, Any] | None:
-        """处理表情包消息。在Napcat层面，它本质上就是发送一张图片，但需要特殊的sub_type。."""
-        filepath = seg.data.get("filepath")
-        if not filepath:
-            logger.warning("发送表情包失败：Seg段中缺少 filepath。")
-            return None
-        # Napcat 发送表情包（作为动画表情）需要设置 sub_type=1
-        image_data = {
-            "file": filepath,
-            "sub_type": 1
-        }
-
-        logger.debug(
-            f"将 sticker Seg (路径: {filepath}) 转换为带 sub_type=1 的 napcat image 段，"
-            f"期望显示为 [动画表情]。"
-            )
-        return {"type": NapcatSegType.image, "data": image_data}
 
     def _convert_at_seg(self, seg: Seg) -> dict[str, Any] | None:
         """处理@消息，必须有 user_id."""
@@ -90,20 +71,28 @@ class SendHandlerAicarus:
         }
 
     def _convert_image_seg(self, seg: Seg) -> dict[str, Any] | None:
-        """处理图片消息，支持多种来源."""
-        # file > url > base64
-        if file_path := (seg.data.get("file") or seg.data.get("file_id")):
+        """处理图片消息，支持多种来源，并能识别表情包标记."""
+        # 优先使用 Base64，因为它直接传输内容
+        if b64_data := seg.data.get("base64"):
+            file_source = f"base64://{b64_data}"
+        elif file_path := (seg.data.get("file") or seg.data.get("file_id")):
             file_source = file_path
         elif url := seg.data.get("url"):
             file_source = url
-        elif b64_data := seg.data.get("base64"):
-            # Base64数据需要加上协议头
-            file_source = f"base64://{b64_data}"
         else:
-            logger.warning("发送图片失败：Seg段中缺少 file, file_id, url 或 base64。")
+            logger.warning("发送图片/表情包失败：Seg段中缺少 base64, file, file_id, 或 url。")
             return None
 
-        return {"type": NapcatSegType.image, "data": {"file": file_source}}
+        image_data = {"file": file_source}
+        # 如果 Core 告诉我们这是个表情包...
+        if seg.data.get("summary") == "sticker":
+            # ...我们就给 Napcat 加上它喜欢的 sub_type=1，这样就会显示为[动画表情]
+            image_data["sub_type"] = 1
+            logger.debug(
+                "检测到 'sticker' 标记，已添加 'sub_type: 1' 到 napcat image 段。"
+            )
+
+        return {"type": NapcatSegType.image, "data": image_data}
 
     def _convert_face_seg(self, seg: Seg) -> dict[str, Any] | None:
         """QQ表情消息，必须有 id."""

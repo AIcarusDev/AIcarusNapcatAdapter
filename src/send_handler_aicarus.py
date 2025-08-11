@@ -55,6 +55,7 @@ class SendHandlerAicarus:
         if not filepath:
             logger.warning("发送表情包失败：Seg段中缺少 filepath。")
             return None
+        # Napcat 发送表情包（作为动画表情）需要设置 sub_type=1
         image_data = {
             "file": filepath,
             "sub_type": 1
@@ -90,15 +91,18 @@ class SendHandlerAicarus:
 
     def _convert_image_seg(self, seg: Seg) -> dict[str, Any] | None:
         """处理图片消息，支持多种来源."""
-        file_source = (
-            seg.data.get("file")
-            or seg.data.get("file_id")
-            or seg.data.get("url")
-            or seg.data.get("base64")
-        )
-        if not file_source:
+        # file > url > base64
+        if file_path := (seg.data.get("file") or seg.data.get("file_id")):
+            file_source = file_path
+        elif url := seg.data.get("url"):
+            file_source = url
+        elif b64_data := seg.data.get("base64"):
+            # Base64数据需要加上协议头
+            file_source = f"base64://{b64_data}"
+        else:
             logger.warning("发送图片失败：Seg段中缺少 file, file_id, url 或 base64。")
             return None
+
         return {"type": NapcatSegType.image, "data": {"file": file_source}}
 
     def _convert_face_seg(self, seg: Seg) -> dict[str, Any] | None:

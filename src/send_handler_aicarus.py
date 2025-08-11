@@ -88,9 +88,7 @@ class SendHandlerAicarus:
         if seg.data.get("summary") == "sticker":
             # ...我们就给 Napcat 加上它喜欢的 sub_type=1，这样就会显示为[动画表情]
             image_data["sub_type"] = 1
-            logger.debug(
-                "检测到 'sticker' 标记，已添加 'sub_type: 1' 到 napcat image 段。"
-            )
+            logger.debug("检测到 'sticker' 标记，已添加 'sub_type: 1' 到 napcat image 段。")
 
         return {"type": NapcatSegType.image, "data": image_data}
 

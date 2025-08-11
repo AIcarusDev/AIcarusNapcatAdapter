@@ -13,7 +13,7 @@ import aiohttp
 import numpy as np
 from aicarus_protocols import ConversationType  # 导入会话类型常量
 from moviepy import ImageSequenceClip
-from PIL import Image
+from PIL import Image, ImageSequence
 
 from .logger import logger
 from .message_queue import get_napcat_api_response
@@ -532,33 +532,39 @@ async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
                 try:
                     # 1. 使用 Pillow 打开下载的动图文件
                     with Image.open(temp_image_path) as im:
-                        # 2. 逐帧读取图像
-                        while True:
-                            try:
-                                # 移动到下一帧
-                                im.seek(im.tell() + 1)
-                                # 3. 转换为 'RGB' 格式以确保兼容性
-                                frame = im.copy().convert("RGB")
-                                # 4. 将 Pillow 图像帧转换为 NumPy 数组
-                                frames.append(np.array(frame))
-                            except EOFError:
-                                # 已经读完所有帧
-                                break
+                        # 2. 使用Pillow官方推荐的ImageSequence.Iterator来安全地迭代所有帧
+                        # 增加一个更可靠的判断，如果Pillow认为它不是动图，就直接中止。
+                        if not getattr(im, "is_animated", False):
+                            logger.warning(
+                                f"文件 '{os.path.basename(temp_image_path)}' "
+                                f"被Pillow识别为静态图片，转换中止。"
+                            )
+                            return
+
+                        logger.debug(f"Pillow 识别到 {im.n_frames} 帧，开始提取...")
+                        for frame_image in ImageSequence.Iterator(im):
+                            # 3. 转换为 'RGB' 格式以确保与视频编码器兼容
+                            frame = frame_image.copy().convert("RGB")
+                            # 4. 将 Pillow 图像帧转换为 NumPy 数组
+                            frames.append(np.array(frame))
+
                 except Exception as e_pil:
                     logger.error(f"使用 Pillow 解析动图帧时失败: {e_pil}", exc_info=True)
-                    return # 如果解析失败，直接终止
+                    return  # 如果解析失败，直接终止
 
                 if not frames:
                     logger.warning("未能从动图文件中提取出任何帧。")
                     return
 
                 # 5. 使用 moviepy 的 ImageSequenceClip 将帧序列合成为视频
-                # 尝试从图像信息中获取帧率，否则使用默认值 25
-                fps = 25
-                if 'duration' in locals().get('im', {}).info:
-                    duration_ms = locals()['im'].info.get('duration')
+                # 尝试从图像信息中获取帧率，否则使用默认值 15 (对于QQ表情更常见)
+                fps = 15
+                if "duration" in locals().get("im", {}).info:
+                    duration_ms = locals()["im"].info.get("duration")
                     if isinstance(duration_ms, int) and duration_ms > 0:
-                        fps = 1000.0 / duration_ms
+                        calculated_fps = 1000.0 / duration_ms
+                        # 限制帧率在合理范围，避免除零或过高
+                        fps = min(max(calculated_fps, 5), 30)
 
                 clip = ImageSequenceClip(frames, fps=fps)
 
@@ -567,8 +573,15 @@ async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
                     temp_mp4_path = temp_f.name
 
                 # 7. 将视频片段写入文件，并进行压缩
+                # 使用 preset='ultrafast' 加快转换速度，对短视频影响不大
                 clip.write_videofile(
-                    temp_mp4_path, codec="libx264", audio=False, bitrate="500k", logger=None
+                    temp_mp4_path,
+                    codec="libx264",
+                    audio=False,
+                    bitrate="500k",
+                    logger=None,
+                    preset="ultrafast",
+                    threads=2,
                 )
                 clip.close()
 

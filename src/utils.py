@@ -11,7 +11,7 @@ from typing import Any
 
 import aiohttp
 import numpy as np
-from aicarus_protocols import ConversationType  # 导入会话类型常量
+from aicarus_protocols import ConversationType, Seg  # [MODIFIED] 导入 Seg
 from moviepy import ImageSequenceClip
 from PIL import Image, ImageSequence
 
@@ -19,7 +19,7 @@ from .logger import logger
 from .message_queue import get_napcat_api_response
 
 
-# --- Napcat API 调用辅助函数 ---
+# --- Napcat API 调用辅助函数 (保持不变) ---
 async def _call_napcat_api(
     server_connection: Any,
     action: str,
@@ -66,7 +66,175 @@ async def _call_napcat_api(
         return None
 
 
-# --- 信息获取类 ---
+# --- [NEW] 全能图片处理器 ---
+async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None = None) -> Seg:
+    """下载并处理一个图片URL，智能判断其为动图还是静态图，并返回相应的AIcarus Seg.
+
+    - 如果是动图，转换为MP4并返回 'video' Seg。
+    - 如果是静态图，返回带有Base64的 'image' Seg。
+    - 如果失败，返回 'text' Seg。
+    """
+    logger.info(f"启动全能图片处理任务, URL: {image_url}")
+    temp_image_path = None
+    temp_mp4_path = None
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+
+    try:
+        # 1. 下载文件
+        async with aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context)
+        ) as session:
+            temp_image_path = await _download_file_to_temp(image_url, session)
+            if not temp_image_path:
+                return Seg(type="text", data={"text": "[图片下载失败]"})
+
+        # 2. 在线程中进行同步的、阻塞的Pillow和moviepy处理
+        def process_image_sync() -> Seg:
+            nonlocal temp_mp4_path
+            try:
+                with Image.open(temp_image_path) as im:
+                    # 3. 检查是否为动图
+                    is_animated = getattr(im, "is_animated", False)
+                    n_frames = getattr(im, "n_frames", 1)
+                    # 增加一个更宽容的判断：即使is_animated为False，但如果帧数大于1，也认为是动图
+                    if not is_animated and n_frames > 1:
+                        logger.warning(
+                            f"Pillow报告is_animated=False，"
+                            f"但检测到 {n_frames} 帧。将尝试按动图处理。"
+                        )
+                        is_animated = True
+
+                    if is_animated:
+                        logger.info(f"Pillow识别为动图 ({n_frames} 帧)，开始转换为MP4...")
+                        frames = [
+                            np.array(frame.copy().convert("RGB"))
+                            for frame in ImageSequence.Iterator(im)
+                        ]
+
+                        if not frames:
+                            logger.warning("未能从动图文件中提取出任何帧。")
+                            return Seg(type="text", data={"text": "[动图帧提取失败]"})
+
+                        fps = 15
+                        if "duration" in im.info:
+                            duration_ms = im.info.get("duration")
+                            if isinstance(duration_ms, int) and duration_ms > 0:
+                                calculated_fps = 1000.0 / duration_ms
+                                fps = min(max(calculated_fps, 5), 30)
+
+                        clip = ImageSequenceClip(frames, fps=fps)
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
+                            temp_mp4_path = temp_f.name
+
+                        clip.write_videofile(
+                            temp_mp4_path,
+                            codec="libx264",
+                            audio=False,
+                            bitrate="500k",
+                            logger=None,
+                            preset="ultrafast",
+                            threads=2,
+                        )
+                        clip.close()
+
+                        with open(temp_mp4_path, "rb") as mp4_file:
+                            mp4_bytes = mp4_file.read()
+
+                        logger.success(f"动图成功转换为MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
+                        return Seg(
+                            type="video",
+                            data={
+                                "summary": "animated_sticker",
+                                "base64": base64.b64encode(mp4_bytes).decode("utf-8"),
+                                "mime_type": "video/mp4",
+                                "file_id": file_id,
+                            },
+                        )
+                    else:
+                        # 4. 如果是静态图
+                        logger.info("Pillow识别为静态图，进行Base64编码。")
+                        with open(temp_image_path, "rb") as f:
+                            image_bytes = f.read()
+
+                        return Seg(
+                            type="image",
+                            data={
+                                "url": image_url,
+                                "file_id": file_id,
+                                "base64": base64.b64encode(image_bytes).decode("utf-8"),
+                                "summary": "image",
+                            },
+                        )
+
+            except Exception as e_proc:
+                logger.error(f"处理图片文件时发生内部错误: {e_proc}", exc_info=True)
+                return Seg(type="text", data={"text": "[图片处理异常]"})
+
+        return await asyncio.to_thread(process_image_sync)
+
+    except Exception as e:
+        logger.error(f"全能图片处理任务发生严重错误: {e}", exc_info=True)
+        return Seg(type="text", data={"text": "[图片处理异常]"})
+    finally:
+        # 5. 清理临时文件
+        if temp_image_path and os.path.exists(temp_image_path):
+            os.remove(temp_image_path)
+        if temp_mp4_path and os.path.exists(temp_mp4_path):
+            os.remove(temp_mp4_path)
+
+
+# --- 其他函数 (保持不变)... ---
+
+
+# (保留 _download_file_to_temp, get_content_type_from_url, 和所有 napcat_ 开头的 API 函数)
+async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> str | None:
+    """下载文件到临时目录并返回路径."""
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                # 注意：这里不再强制指定 .gif 后缀，让系统自动处理
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
+                    temp_file.write(await response.read())
+                    return temp_file.name
+    except Exception as e:
+        logger.error(f"下载动图文件失败: {url}, 错误: {e}", exc_info=True)
+    return None
+
+
+async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
+    """通过发送 HEAD 请求，高效地获取 URL 对应资源的 Content-Type."""
+    if not url:
+        return None
+
+    ssl_context = ssl.create_default_context()
+    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
+
+    try:
+        async with (
+            aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session,
+            session.head(url, timeout=timeout, allow_redirects=True) as response,
+        ):
+            # 使用 HEAD 请求，只获取响应头，不下载文件体，非常高效
+            if response.status == 200:
+                content_type = response.headers.get("Content-Type")
+                if content_type:
+                    # 清理掉可能存在的 charset 等附加信息
+                    return content_type.split(";")[0].strip()
+                else:
+                    logger.warning(f"获取 Content-Type 失败 (HTTP {response.status}): {url}")
+                    return None
+    except TimeoutError:
+        logger.warning(f"获取 Content-Type 超时: {url}")
+        return None
+    except Exception as e:
+        logger.error(f"获取 Content-Type 时发生未知错误 (URL: {url}): {e}")
+        return None
+
+
+# --- 所有 napcat_ 开头的 API 函数保持原样 ---
+# ... (此处省略所有 napcat_... 函数, 请保留你文件中的这些函数)
 async def napcat_get_self_info(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """获取当前登录用户的信息."""
     return await _call_napcat_api(server_connection, "get_login_info", {})
@@ -130,17 +298,14 @@ async def napcat_get_history(server_connection: Any, **kwargs: Any) -> dict[str,
     return None
 
 
-# --- 好友操作类 ---
 async def napcat_delete_friend(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """删除好友的统一入口."""
     params = {
         "user_id": int(kwargs["user_id"]),
     }
-    # 根据 gocq_api.md，这个接口叫 delete_friend，不是 set_delete_friend
     return await _call_napcat_api(server_connection, "delete_friend", params)
 
 
-# --- 群组管理类 ---
 async def napcat_set_group_kick(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """踢出群成员的统一入口."""
     params = {
@@ -217,7 +382,6 @@ async def napcat_set_group_name(server_connection: Any, **kwargs: Any) -> dict[s
     return await _call_napcat_api(server_connection, "set_group_name", params)
 
 
-# --- 消息操作类 ---
 async def napcat_delete_msg(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """删除消息的统一入口."""
     return await _call_napcat_api(
@@ -256,7 +420,6 @@ async def napcat_forward_single_msg(server_connection: Any, **kwargs: Any) -> di
     return None
 
 
-# --- 请求处理类 ---
 async def napcat_set_friend_add_request(
     server_connection: Any, **kwargs: Any
 ) -> dict[str, Any] | None:
@@ -282,7 +445,6 @@ async def napcat_set_group_add_request(
     return await _call_napcat_api(server_connection, "set_group_add_request", params)
 
 
-# --- 文件操作类 ---
 async def napcat_upload_group_file(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """上传群文件的统一入口."""
     params: dict[str, Any] = {
@@ -348,7 +510,6 @@ async def napcat_get_group_file_url(server_connection: Any, **kwargs: Any) -> di
     return await _call_napcat_api(server_connection, "get_group_file_url", params)
 
 
-# --- 其他功能类 ---
 async def napcat_set_group_sign(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """设置群组签名的统一入口."""
     return await _call_napcat_api(
@@ -387,9 +548,7 @@ async def napcat_send_group_notice(server_connection: Any, **kwargs: Any) -> dic
     }
     if kwargs.get("image"):
         params["image"] = kwargs["image"]
-    return await _call_napcat_api(
-        server_connection, "_send_group_notice", params
-    )  # 注意gocq的下划线
+    return await _call_napcat_api(server_connection, "_send_group_notice", params)
 
 
 async def napcat_get_group_notice(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
@@ -438,170 +597,3 @@ async def napcat_get_forward_msg_content(
             f"字段格式不正确: {data.get('messages')}"
         )
     return None
-
-
-# --- 图片处理工具函数 (这部分保持不变) ---
-async def get_image_base64_from_url(url: str, timeout: int = 10) -> str | None:
-    """从给定的 URL 下载图片并返回其 Base64 编码字符串."""
-    ssl_context = ssl.create_default_context()
-    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
-    try:
-        async with aiohttp.ClientSession(  # noqa: SIM117
-            connector=aiohttp.TCPConnector(ssl=ssl_context)
-        ) as session:
-            async with session.get(url, timeout=timeout) as response:
-                if response.status == 200:
-                    image_bytes = await response.read()
-                    return base64.b64encode(image_bytes).decode("utf-8")
-                else:
-                    logger.error(f"下载图片失败 (HTTP {response.status}): {url}")
-                    return None
-    except Exception as e:
-        logger.error(f"下载或处理图片时发生错误 (URL: {url}): {e}", exc_info=True)
-        return None
-
-
-async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> str | None:
-    """下载文件到临时目录并返回路径."""
-    try:
-        async with session.get(url) as response:
-            if response.status == 200:
-                # 注意：这里不再强制指定 .gif 后缀，让系统自动处理
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
-                    temp_file.write(await response.read())
-                    return temp_file.name
-    except Exception as e:
-        logger.error(f"下载动图文件失败: {url}, 错误: {e}", exc_info=True)
-    return None
-
-
-async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
-    """通过发送 HEAD 请求，高效地获取 URL 对应资源的 Content-Type."""
-    if not url:
-        return None
-
-    ssl_context = ssl.create_default_context()
-    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
-
-    try:
-        async with (
-            aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context)) as session,
-            session.head(url, timeout=timeout, allow_redirects=True) as response,
-        ):
-            # 使用 HEAD 请求，只获取响应头，不下载文件体，非常高效
-            if response.status == 200:
-                content_type = response.headers.get("Content-Type")
-                if content_type:
-                    # 清理掉可能存在的 charset 等附加信息
-                    return content_type.split(";")[0].strip()
-                else:
-                    logger.warning(f"获取 Content-Type 失败 (HTTP {response.status}): {url}")
-                    return None
-    except TimeoutError:
-        logger.warning(f"获取 Content-Type 超时: {url}")
-        return None
-    except Exception as e:
-        logger.error(f"获取 Content-Type 时发生未知错误 (URL: {url}): {e}")
-        return None
-
-
-async def convert_gif_to_mp4_base64(gif_url: str) -> str | None:
-    """下载动图 (GIF, APNG, WebP等)，使用Pillow逐帧解析.
-
-    再用moviepy合成为压缩的MP4，并返回Base64编码。
-    """
-    logger.info(f"开始处理动图转换任务, URL: {gif_url}")
-    temp_image_path = None
-    temp_mp4_path = None
-
-    ssl_context = ssl.create_default_context()
-    ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
-
-    try:
-        async with aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(ssl=ssl_context)
-        ) as session:
-            temp_image_path = await _download_file_to_temp(gif_url, session)
-            if not temp_image_path:
-                return None
-
-            # 使用 to_thread 运行同步的、阻塞的 Pillow 和 moviepy 代码
-            def convert_sync() -> None:
-                nonlocal temp_mp4_path
-                frames = []
-                try:
-                    # 1. 使用 Pillow 打开下载的动图文件
-                    with Image.open(temp_image_path) as im:
-                        # 2. 使用Pillow官方推荐的ImageSequence.Iterator来安全地迭代所有帧
-                        # 增加一个更可靠的判断，如果Pillow认为它不是动图，就直接中止。
-                        if not getattr(im, "is_animated", False):
-                            logger.warning(
-                                f"文件 '{os.path.basename(temp_image_path)}' "
-                                f"被Pillow识别为静态图片，转换中止。"
-                            )
-                            return
-
-                        logger.debug(f"Pillow 识别到 {im.n_frames} 帧，开始提取...")
-                        for frame_image in ImageSequence.Iterator(im):
-                            # 3. 转换为 'RGB' 格式以确保与视频编码器兼容
-                            frame = frame_image.copy().convert("RGB")
-                            # 4. 将 Pillow 图像帧转换为 NumPy 数组
-                            frames.append(np.array(frame))
-
-                except Exception as e_pil:
-                    logger.error(f"使用 Pillow 解析动图帧时失败: {e_pil}", exc_info=True)
-                    return  # 如果解析失败，直接终止
-
-                if not frames:
-                    logger.warning("未能从动图文件中提取出任何帧。")
-                    return
-
-                # 5. 使用 moviepy 的 ImageSequenceClip 将帧序列合成为视频
-                # 尝试从图像信息中获取帧率，否则使用默认值 15 (对于QQ表情更常见)
-                fps = 15
-                if "duration" in locals().get("im", {}).info:
-                    duration_ms = locals()["im"].info.get("duration")
-                    if isinstance(duration_ms, int) and duration_ms > 0:
-                        calculated_fps = 1000.0 / duration_ms
-                        # 限制帧率在合理范围，避免除零或过高
-                        fps = min(max(calculated_fps, 5), 30)
-
-                clip = ImageSequenceClip(frames, fps=fps)
-
-                # 6. 创建一个临时文件路径用于输出 MP4
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
-                    temp_mp4_path = temp_f.name
-
-                # 7. 将视频片段写入文件，并进行压缩
-                # 使用 preset='ultrafast' 加快转换速度，对短视频影响不大
-                clip.write_videofile(
-                    temp_mp4_path,
-                    codec="libx264",
-                    audio=False,
-                    bitrate="500k",
-                    logger=None,
-                    preset="ultrafast",
-                    threads=2,
-                )
-                clip.close()
-
-            await asyncio.to_thread(convert_sync)
-
-            if temp_mp4_path and os.path.exists(temp_mp4_path):
-                with open(temp_mp4_path, "rb") as mp4_file:
-                    mp4_bytes = mp4_file.read()
-                logger.success(f"动图成功转换为 MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
-                return base64.b64encode(mp4_bytes).decode("utf-8")
-            else:
-                logger.warning("同步转换过程未能成功生成 MP4 文件。")
-                return None
-
-    except Exception as e:
-        logger.error(f"动图到 MP4 转换过程中发生严重错误: {e}", exc_info=True)
-        return None
-    finally:
-        # 清理所有临时文件
-        if temp_image_path and os.path.exists(temp_image_path):
-            os.remove(temp_image_path)
-        if temp_mp4_path and os.path.exists(temp_mp4_path):
-            os.remove(temp_mp4_path)

@@ -17,13 +17,11 @@ from .logger import logger
 from .napcat_definitions import NapcatSegType
 from .qq_emoji_list import qq_face
 from .utils import (
-    convert_gif_to_mp4_base64,
-    get_content_type_from_url,
-    get_image_base64_from_url,
     napcat_get_forward_msg_content,
     napcat_get_group_info,
     napcat_get_member_info,
     napcat_get_self_info,
+    process_image_url_to_aicarus_seg,
 )
 
 
@@ -190,81 +188,17 @@ class RecvHandlerAicarus:
                 face_name = qq_face.get(face_id, f"[未知表情:{face_id}]")
                 aicarus_s = Seg(type="face", data={"id": face_id, "name": face_name})
 
+            # [MODIFIED] 统一图片处理逻辑
             elif seg_type == NapcatSegType.image:
                 image_url = seg_data.get("url")
                 file_id = seg_data.get("file")
 
-                # 如果连 URL 都没有，直接当作普通图片处理（可能后续逻辑能从 file_id 恢复）
                 if not image_url:
+                    # 如果没有URL，只能返回一个包含file_id的基础图片Seg
                     aicarus_s = Seg(type="image", data={"file_id": file_id, "summary": "image"})
-                    aicarus_segs.append(aicarus_s)
-                    continue
-
-                # --- 全新的、更健壮的动图判断逻辑 ---
-                is_animated = False
-                try:
-                    # 1. 获取真实的 MIME 类型
-                    mime_type = await get_content_type_from_url(image_url)
-
-                    # 2. 启发式判断
-                    summary_says_animated = seg_data.get("summary") == "[动画表情]"
-                    ext_says_animated = image_url.lower().endswith((".gif", ".webp", ".apng"))
-
-                    # 3. 决定性判断
-                    # 如果 MIME 类型明确是动图，那就是动图
-                    if mime_type in ("image/gif", "image/webp", "image/apng"):
-                        is_animated = True
-                    # 如果 MIME 类型明确是静态图，那它就不是动图，即使 summary 或扩展名误导了我们
-                    elif mime_type in ("image/jpeg", "image/png", "image/bmp"):
-                        is_animated = False
-                    # 如果 MIME 类型未知，我们只能相信启发式判断
-                    elif mime_type is None:
-                        is_animated = summary_says_animated or ext_says_animated
-
-                except Exception as e_check:
-                    logger.error(f"检查图片是否为动图时发生异常: {e_check}", exc_info=True)
-                    # 出现异常时，保守地认为它是静态图
-                    is_animated = False
-
-                if is_animated:
-                    logger.info(f"检测到动图 (URL: {image_url})，尝试转换为 MP4...")
-                    try:
-                        mp4_base64 = await convert_gif_to_mp4_base64(image_url)
-                        if mp4_base64:
-                            aicarus_s = Seg(
-                                type="video",
-                                data={
-                                    "summary": "animated_sticker",
-                                    "base64": mp4_base64,
-                                    "mime_type": "video/mp4",
-                                    "file_id": file_id,
-                                },
-                            )
-                            logger.success(f"动图 {file_id or image_url} 成功转换为视频段。")
-                        else:
-                            logger.warning(f"动图 {file_id or image_url} 转换失败，降级为文本。")
-                            aicarus_s = Seg(type="text", data={"text": "[动图加载失败]"})
-                    except Exception as e_conv:
-                        logger.error(f"转换动图时发生严重错误: {e_conv}", exc_info=True)
-                        aicarus_s = Seg(type="text", data={"text": "[动图处理异常]"})
-
                 else:
-                    # --- 确认是静态图片，执行原始的静态图片逻辑 ---
-                    image_base64 = None
-                    try:
-                        image_base64 = await get_image_base64_from_url(image_url)
-                    except Exception as e_static:
-                        logger.error(f"处理静态图片URL时发生错误: {e_static}")
-
-                    aicarus_s = Seg(
-                        type="image",
-                        data={
-                            "url": image_url,
-                            "file_id": file_id,
-                            "base64": image_base64,
-                            "summary": "image",
-                        },
-                    )
+                    # 如果有URL，交给全能处理器来决策返回什么类型的Seg
+                    aicarus_s = await process_image_url_to_aicarus_seg(image_url, file_id)
 
             elif seg_type == NapcatSegType.at:
                 qq_num = seg_data.get("qq")

@@ -50,15 +50,21 @@ class SendHandlerAicarus:
         }
 
     def _convert_sticker_seg(self, seg: Seg) -> dict[str, Any] | None:
-        """处理表情包消息。在Napcat层面，它本质上就是发送一张图片."""
+        """处理表情包消息。在Napcat层面，它本质上就是发送一张图片，但需要特殊的sub_type。."""
         filepath = seg.data.get("filepath")
         if not filepath:
             logger.warning("发送表情包失败：Seg段中缺少 filepath。")
             return None
-        # 直接将其作为一个标准的图片段来处理，Napcat和QQ客户端会根据文件类型和内容
-        # 决定其最终显示为 [图片] 还是 [动画表情]。
-        logger.debug(f"将 sticker Seg (路径: {filepath}) 转换为 napcat image 段。")
-        return {"type": NapcatSegType.image, "data": {"file": filepath}}
+        image_data = {
+            "file": filepath,
+            "sub_type": 1
+        }
+
+        logger.debug(
+            f"将 sticker Seg (路径: {filepath}) 转换为带 sub_type=1 的 napcat image 段，"
+            f"期望显示为 [动画表情]。"
+            )
+        return {"type": NapcatSegType.image, "data": image_data}
 
     def _convert_at_seg(self, seg: Seg) -> dict[str, Any] | None:
         """处理@消息，必须有 user_id."""

@@ -18,6 +18,11 @@ from PIL import Image, ImageSequence
 from .logger import logger
 from .message_queue import get_napcat_api_response
 
+# 基于Gemini官方文档的最佳实践
+MAX_RESOLUTION = (512, 512)
+TARGET_FPS = 5  # 降至5 FPS，略高于Gemini的默认值，捕捉动态同时保持高效率
+MAX_DURATION_SECONDS = 10 # 暂时限制最大时长以控制Token，直到找到解决方案
+
 
 # --- Napcat API 调用辅助函数 (保持不变) ---
 async def _call_napcat_api(
@@ -107,42 +112,67 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                         is_animated = True
 
                     if is_animated:
-                        logger.info(f"Pillow识别为动图 ({n_frames} 帧)，开始转换为MP4...")
-                        frames = [
-                            np.array(frame.copy().convert("RGB"))
-                            for frame in ImageSequence.Iterator(im)
-                        ]
+                        # 动图处理逻辑
+                        logger.info(
+                            f"Pillow识别为动图 ({n_frames} 帧)，开始转换为Gemini优化的MP4..."
+                            )
 
-                        if not frames:
+                        resized_frames = []
+                        for frame in ImageSequence.Iterator(im):
+                            frame_rgba = frame.convert("RGBA")
+                            frame_rgba.thumbnail(MAX_RESOLUTION, Image.Resampling.LANCZOS)
+                            frame_rgb = np.array(frame_rgba.convert("RGB"))
+                            resized_frames.append(frame_rgb)
+
+                        if not resized_frames:
                             logger.warning("未能从动图文件中提取出任何帧。")
                             return Seg(type="text", data={"text": "[动图帧提取失败]"})
 
-                        fps = 15
+                        # 计算原始帧率
+                        source_fps = TARGET_FPS
                         if "duration" in im.info:
                             duration_ms = im.info.get("duration")
                             if isinstance(duration_ms, int) and duration_ms > 0:
-                                calculated_fps = 1000.0 / duration_ms
-                                fps = min(max(calculated_fps, 5), 30)
+                                source_fps = 1000.0 / duration_ms
 
-                        clip = ImageSequenceClip(frames, fps=fps)
+                        # 最终帧率不超过我们的目标值
+                        final_fps = min(source_fps, TARGET_FPS)
+
+                        # 计算并限制总时长
+                        total_duration = min(len(resized_frames) / final_fps, MAX_DURATION_SECONDS)
+
+                        clip = ImageSequenceClip(resized_frames, fps=final_fps)
+                        clip = clip.set_duration(total_duration)
+
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
                             temp_mp4_path = temp_f.name
 
+                        # 优化write_videofile参数
                         clip.write_videofile(
                             temp_mp4_path,
                             codec="libx264",
                             audio=False,
-                            bitrate="500k",
+                            bitrate="500k", # 较低的比特率以减小文件大小
                             logger=None,
-                            preset="ultrafast",
+                            preset="medium",  # 平衡的预设，提供良好的压缩率
                             threads=2,
+                            ffmpeg_params=[
+                                '-pix_fmt', 'yuv420p' # 保证最佳兼容性
+                            ]
                         )
                         clip.close()
 
                         with open(temp_mp4_path, "rb") as mp4_file:
                             mp4_bytes = mp4_file.read()
 
-                        logger.success(f"动图成功转换为MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
+                        file_kb_size = len(mp4_bytes) / 1024
+                        logger.success(
+                            f"动图成功转换为优化MP4, 分辨率: <={MAX_RESOLUTION}, "
+                            f"FPS: {final_fps:.2f}, "
+                            f"时长: {total_duration:.2f}s, "
+                            f"大小: {file_kb_size:.2f} KB"
+                        )
+
                         return Seg(
                             type="video",
                             data={

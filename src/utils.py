@@ -21,7 +21,7 @@ from .message_queue import get_napcat_api_response
 # 基于Gemini官方文档的最佳实践
 MAX_RESOLUTION = (512, 512)
 TARGET_FPS = 5  # 降至5 FPS，略高于Gemini的默认值，捕捉动态同时保持高效率
-MAX_DURATION_SECONDS = 10 # 暂时限制最大时长以控制Token，直到找到解决方案
+MAX_DURATION_SECONDS = 10  # 暂时限制最大时长以控制Token，直到找到解决方案
 
 
 # --- Napcat API 调用辅助函数 (保持不变) ---
@@ -115,7 +115,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                         # 动图处理逻辑
                         logger.info(
                             f"Pillow识别为动图 ({n_frames} 帧)，开始转换为Gemini优化的MP4..."
-                            )
+                        )
 
                         resized_frames = []
                         for frame in ImageSequence.Iterator(im):
@@ -152,13 +152,14 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                             temp_mp4_path,
                             codec="libx264",
                             audio=False,
-                            bitrate="500k", # 较低的比特率以减小文件大小
+                            bitrate="500k",  # 较低的比特率以减小文件大小
                             logger=None,
                             preset="medium",  # 平衡的预设，提供良好的压缩率
                             threads=2,
                             ffmpeg_params=[
-                                '-pix_fmt', 'yuv420p' # 保证最佳兼容性
-                            ]
+                                "-pix_fmt",
+                                "yuv420p",  # 保证最佳兼容性
+                            ],
                         )
                         clip.close()
 

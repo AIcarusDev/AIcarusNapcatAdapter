@@ -12,7 +12,7 @@ from typing import Any
 import aiohttp
 import numpy as np
 from aicarus_protocols import ConversationType, Seg  # [MODIFIED] 导入 Seg
-from moviepy import ImageSequenceClip
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageSequence
 
 from .logger import logger

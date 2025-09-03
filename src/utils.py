@@ -628,3 +628,37 @@ async def napcat_get_forward_msg_content(
             f"字段格式不正确: {data.get('messages')}"
         )
     return None
+
+async def napcat_get_bot_profile_for_core(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
+    """
+    [为AIcarusCore安检专用] 
+    一个强大的复合函数，获取机器人自身、好友列表和群聊列表，并组合成Core需要的完整档案。
+    """
+    logger.info("安检流程: 正在执行 get_bot_profile_for_core...")
+    
+    # 使用 asyncio.gather 并发执行所有需要的 API 调用
+    profile_task = _call_napcat_api(server_connection, "get_login_info", {})
+    friends_task = _call_napcat_api(server_connection, "get_friend_list", {})
+    groups_task = _call_napcat_api(server_connection, "get_group_list", {})
+    
+    results = await asyncio.gather(profile_task, friends_task, groups_task)
+    
+    profile_data, friends_list, groups_list = results
+    
+    if not profile_data:
+        logger.error("安检失败: 未能获取到基本的机器人信息 (get_login_info)。")
+        return None
+        
+    # 将群聊列表转换为 Napcat API 返回的那种以 group_id 为键的字典格式
+    groups_dict = {str(group.get("group_id", "")): group for group in groups_list} if groups_list else {}
+    
+    # 组装成 Core 需要的最终格式
+    full_profile = {
+        "user_id": profile_data.get("user_id"),
+        "user_nickname": profile_data.get("nickname"),
+        "friends": friends_list if friends_list else [],
+        "groups": groups_dict
+    }
+    
+    logger.info(f"安检流程: 成功组装了 {len(full_profile['friends'])} 位好友和 {len(full_profile['groups'])} 个群聊的完整档案。")
+    return full_profile

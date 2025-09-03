@@ -9,8 +9,10 @@ import websockets  # 确保导入
 # v1.5.1 协议库
 from aicarus_protocols import (
     PROTOCOL_VERSION,
+    EventBuilder,
 )
 
+from . import aic_com_layer
 from .aic_com_layer import (  # 从新的 v1.5.1 通信层导入
     aic_start_com,  # 这个函数现在会启动 core_connection_client.run_forever()
     aic_stop_com,  # 这个函数会调用 core_connection_client.stop_communication()
@@ -41,20 +43,17 @@ from .send_handler_aicarus import send_handler_aicarus
 
 
 async def napcat_message_receiver(
-    server_connection: websockets.WebSocketServerProtocol,
+    websocket: websockets.WebSocketServerProtocol, path: str
 ) -> None:
     """处理来自 Napcat 的连接和消息，并将消息分发给 RecvHandlerAicarus."""
-    logger.info(f"Napcat 客户端已连接: {server_connection.remote_address}")
-    recv_handler_aicarus.server_connection = server_connection
-    send_handler_aicarus.server_connection = server_connection
+    logger.info(f"Napcat 客户端已连接: {websocket.remote_address}")
 
-    # 把获取 Bot ID 这个任务用 create_task 扔到后台去做，
-    # 不要让它阻塞我们接收消息的主干道
-    # 我们不再 await 它，让招待员（本函数）立刻开始工作
-    background_tasks = set()
-    bot_id_task = asyncio.create_task(recv_handler_aicarus._get_bot_id())
-    background_tasks.add(bot_id_task)
-    bot_id_task.add_done_callback(background_tasks.discard)
+    # --- 核心修改 1：将 Napcat 连接注入通信层 ---
+    aic_com_layer.core_connection_client.set_napcat_server_connection(websocket)
+
+    recv_handler_aicarus.server_connection = websocket
+    send_handler_aicarus.server_connection = websocket
+
 
     # ------------------ 1: 接入 Core ------------------
     # 在确认QQ已连接后，我们才开始启动与Core的连接
@@ -63,7 +62,7 @@ async def napcat_message_receiver(
     # -----------------------------------------------------------
 
     try:
-        async for raw_message_str in server_connection:
+        async for raw_message_str in websocket:
             logger.debug(f"AIcarus Adapter: Raw from Napcat: {raw_message_str[:120]}...")
             try:
                 napcat_event: dict = json.loads(raw_message_str)
@@ -88,21 +87,21 @@ async def napcat_message_receiver(
                 )
 
     except websockets.exceptions.ConnectionClosedOK:
-        logger.info(f"Napcat client {server_connection.remote_address} disconnected gracefully.")
+        logger.info(f"Napcat client {websocket.remote_address} disconnected gracefully.")
     except websockets.exceptions.ConnectionClosedError as e:
         logger.warning(
-            f"Napcat client {server_connection.remote_address} connection closed with error: {e}"
+            f"Napcat client {websocket.remote_address} connection closed with error: {e}"
         )
     except Exception as e:
         logger.error(
-            f"处理 Napcat 连接时发生未知错误 ({server_connection.remote_address}): {e}",
+            f"处理 Napcat 连接时发生未知错误 ({websocket.remote_address}): {e}",
             exc_info=True,
         )
     finally:
-        logger.info(f"Napcat 客户端连接已结束: {server_connection.remote_address}")
-        if recv_handler_aicarus.server_connection == server_connection:
+        logger.info(f"Napcat 客户端连接已结束: {websocket.remote_address}")
+        if recv_handler_aicarus.server_connection == websocket:
             recv_handler_aicarus.server_connection = None
-        if send_handler_aicarus.server_connection == server_connection:
+        if send_handler_aicarus.server_connection == websocket:
             send_handler_aicarus.server_connection = None
 
         # ------------------ 2: 与Core分离 ------------------

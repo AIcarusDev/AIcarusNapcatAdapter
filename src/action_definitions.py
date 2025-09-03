@@ -1,4 +1,5 @@
 # aicarus_napcat_adapter/src/action_definitions.py (v3.0 重构版)
+from . import utils
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
@@ -277,6 +278,9 @@ ACTION_MAPPING: dict[str, ActionMappingType] = {
         utils.napcat_get_group_file_url,
         ["group_id", "file_id", "busid"],
     ),
+    # 将 get_bot_profile 指向新的复合函数
+    # 注释：这个动作是为 AIcarusCore 的上线安检流程专门设计的，用于获取机器人的完整档案。
+    "get_bot_profile": (utils.napcat_get_bot_profile_for_core, []),
     # --- 其他功能 ---
     "sign_in": (utils.napcat_set_group_sign, ["group_id"]),
     "set_status": (utils.napcat_set_online_status, ["status"]),

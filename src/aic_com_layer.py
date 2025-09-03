@@ -14,9 +14,9 @@ import websockets  # type: ignore
 from aicarus_protocols import PROTOCOL_VERSION, Event, Seg
 from websockets.exceptions import ConnectionClosed, InvalidURI, WebSocketException  # type: ignore
 
-from .config import get_config
-
 # 从同级目录导入
+from . import utils
+from .config import get_config
 from .logger import logger
 
 # 定义从 Core 收到的消息的处理回调类型
@@ -39,6 +39,13 @@ class CoreConnectionClient:
         self._reconnect_delay: int = 5
         self._on_event_from_core_callback: CoreEventCallback | None = None
         self.heartbeat_interval: int = 30
+        self.napcat_server_connection: Any | None = None
+        self.bot_profile_cache: dict[str, Any] | None = None # 用于缓存档案数据
+
+    def set_napcat_server_connection(self, napcat_connection: Any) -> None:
+        """从外部设置 Napcat 服务器的连接实例."""
+        self.napcat_server_connection = napcat_connection
+        logger.info("通信层已成功获取 Napcat 服务器连接的引用。")
 
     def register_core_event_handler(self, callback: CoreEventCallback) -> None:
         """注册一个回调函数，用于处理从 Core 服务器收到的事件."""
@@ -61,6 +68,24 @@ class CoreConnectionClient:
             )
             self.websocket = await websockets.connect(self.core_ws_url)
             logger.info(f"已成功连接到 Core WebSocket 服务器: {self.core_ws_url}")
+
+            # --- 核心修改 2：在此处主动获取并缓存档案 ---
+            if self.napcat_server_connection:
+                logger.info("连接已建立，立即开始主动获取并缓存自身档案...")
+                profile_data = await utils.napcat_get_bot_profile_for_core(self.napcat_server_connection)
+                if profile_data:
+                    # --- 核心修改：缓存获取到的档案 ---
+                    self.bot_profile_cache = profile_data
+                    # 成功获取后，更新 bot_id 并缓存完整档案
+                    bot_id = profile_data.get("user_id")
+                    if bot_id:
+                        self.update_bot_id(str(bot_id))
+                    
+                    logger.success("自身档案已成功获取并缓存，准备就绪，等待 Core 安检。")
+                else:
+                    logger.error("在主动获取自身档案时失败，安检预计将失败。")
+            else:
+                logger.warning("无法主动获取档案：Napcat 服务器连接不可用。")
 
             adapter_id_for_registration = self.platform_id
             logger.info(
@@ -107,6 +132,34 @@ class CoreConnectionClient:
                 f"已向 Core 发送 {connect_event_type} 事件 "
                 f"(Adapter ID: {adapter_id_for_registration})，此事件将用于注册。"
             )
+            # --- 安检问题：在此处立即发送 ready 事件，确保时序正确 ---
+            if self.bot_id:
+                logger.info("Adapter 已完全就绪，正在向 Core 发送 meta.lifecycle.ready 信号...")
+                ready_event_type = f"meta.{self.platform_id}.lifecycle.ready"
+                ready_event = Event(
+                    event_id=f"meta_ready_{uuid.uuid4()}",
+                    event_type=ready_event_type,
+                    time=int(time.time() * 1000),
+                    bot_id=self.bot_id,
+                    content=[
+                        Seg(
+                            type="meta.lifecycle",
+                            data={
+                                "lifecycle_type": "ready",
+                                "details": {
+                                    "message": "Adapter is fully initialized and ready for inspection.",
+                                    # --- 在此处附加上缓存的档案 ---
+                                    "profile_data": self.bot_profile_cache,
+                                },
+                            },
+                        )
+                    ],
+                )
+                await self.send_event_to_core(ready_event.to_dict())
+                logger.success(f"{ready_event_type} 信号已成功发送至 Core。")
+            else:
+                logger.error("由于 bot_id 未能获取，无法发送 ready 信号，安检流程无法启动。")
+            # --- 解决方案结束 ---
             return True
         except InvalidURI:
             logger.critical(f"连接 Core 失败: 无效的 WebSocket URI '{self.core_ws_url}'")

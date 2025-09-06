@@ -1,5 +1,4 @@
-# aicarus_napcat_adapter/src/action_definitions.py (v3.0 重构版)
-from . import utils
+# aicarus_napcat_adapter/src/action_definitions.py
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 

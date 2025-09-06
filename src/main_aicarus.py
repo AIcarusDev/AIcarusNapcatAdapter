@@ -9,7 +9,6 @@ import websockets  # 确保导入
 # v1.5.1 协议库
 from aicarus_protocols import (
     PROTOCOL_VERSION,
-    EventBuilder,
 )
 
 from . import aic_com_layer

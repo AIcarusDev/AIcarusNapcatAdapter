@@ -72,18 +72,32 @@ class CoreConnectionClient:
             # --- 核心修改 2：在此处主动获取并缓存档案 ---
             if self.napcat_server_connection:
                 logger.info("连接已建立，立即开始主动获取并缓存自身档案...")
-                profile_data = await utils.napcat_get_bot_profile_for_core(self.napcat_server_connection)
-                if profile_data:
-                    # --- 核心修改：缓存获取到的档案 ---
+                profile_data = await utils.napcat_get_bot_profile_for_core(
+                    self.napcat_server_connection
+                )
+                if profile_data and (bot_id_str := str(profile_data.get("user_id"))):
+                    # 使用 utils.py 中定义的正确函数来获取自身信息
+                    logger.info(f"正在为 Bot ID: {bot_id_str} 获取详细信息以补全昵称...")
+                    self_info = await utils.napcat_get_self_info(self.napcat_server_connection)
+
+                    # NapCat 的 get_login_info 返回的昵称键是 'nickname'
+                    if self_info and (nickname := self_info.get("nickname")):
+                        profile_data["nickname"] = nickname
+                        logger.success(f"成功获取并补全昵称: {nickname}")
+                    else:
+                        # nickname 理论上不可能为空
+                        # 如果连这都没有，说明 Napcat 服务器有严重问题，或代码逻辑有误
+                        logger.critical("严重错误：无法从 Napcat 获取到自身的昵称！")
+                        return False
+
+                    # 缓存档案并更新 bot_id
                     self.bot_profile_cache = profile_data
-                    # 成功获取后，更新 bot_id 并缓存完整档案
-                    bot_id = profile_data.get("user_id")
-                    if bot_id:
-                        self.update_bot_id(str(bot_id))
-                    
+                    self.update_bot_id(bot_id_str)
                     logger.success("自身档案已成功获取并缓存，准备就绪，等待 Core 安检。")
                 else:
-                    logger.error("在主动获取自身档案时失败，安检预计将失败。")
+                    logger.critical(
+                        "在主动获取自身档案时失败，或档案中缺少 user_id，安检预计将失败。"
+                    )
             else:
                 logger.warning("无法主动获取档案：Napcat 服务器连接不可用。")
 
@@ -147,7 +161,10 @@ class CoreConnectionClient:
                             data={
                                 "lifecycle_type": "ready",
                                 "details": {
-                                    "message": "Adapter is fully initialized and ready for inspection.",
+                                    "message": (
+                                        "Adapter is fully initialized and "
+                                        "ready for inspection."
+                                    ),
                                     # --- 在此处附加上缓存的档案 ---
                                     "profile_data": self.bot_profile_cache,
                                 },

@@ -8,6 +8,7 @@ import ssl
 import tempfile
 import uuid
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit, quote
 
 import aiohttp
 import numpy as np
@@ -87,13 +88,49 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
     ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 
     try:
-        # 1. 下载文件
+        # [NEW] 4.1. 增加 URL 规范化与预处理
+        try:
+            parts = urlsplit(image_url)
+            path = quote(parts.path)
+            query = quote(parts.query, safe='=&')
+            safe_url = urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
+            if safe_url != image_url:
+                logger.debug(f"URL 已规范化: {image_url} -> {safe_url}")
+        except Exception as e:
+            logger.error(f"URL 解析失败: {image_url}, 错误: {e}")
+            return Seg(
+                type="image_failed",
+                data={
+                    "reason": "Invalid URL",
+                    "details": f"URL parsing error: {e}",
+                    "url": image_url,
+                },
+            )
+
+        # 模拟客户端请求，增强伪装
+        headers = {
+            "User-Agent": "QQ/9.7.13.29121",
+            "Referer": "https://c.tenpay.com/",
+            "Accept": "*/*",
+        }
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl_context)
         ) as session:
-            temp_image_path = await _download_file_to_temp(image_url, session)
+            temp_image_path, status_code, error_reason = await _download_file_to_temp(
+                safe_url, session, headers
+            )
             if not temp_image_path:
-                return Seg(type="text", data={"text": "[图片下载失败]"})
+                logger.error(
+                    f"图片下载失败. URL: {image_url}, Status: {status_code}, Reason: {error_reason}"
+                )
+                return Seg(
+                    type="image_failed",
+                    data={
+                        "reason": f"HTTP Error {status_code}" if status_code else "Download Error",
+                        "details": str(error_reason)[:200],  # 限制长度
+                        "url": image_url,
+                    },
+                )
 
         # 2. 在线程中进行同步的、阻塞的Pillow和moviepy处理
         def process_image_sync() -> Seg:
@@ -126,7 +163,14 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
 
                         if not resized_frames:
                             logger.warning("未能从动图文件中提取出任何帧。")
-                            return Seg(type="text", data={"text": "[动图帧提取失败]"})
+                            return Seg(
+                                type="image_failed",
+                                data={
+                                    "reason": "Processing Error",
+                                    "details": "Could not extract frames from animated image.",
+                                    "url": image_url,
+                                },
+                            )
 
                         # 计算原始帧率
                         source_fps = TARGET_FPS
@@ -201,13 +245,27 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
 
             except Exception as e_proc:
                 logger.error(f"处理图片文件时发生内部错误: {e_proc}", exc_info=True)
-                return Seg(type="text", data={"text": "[图片处理异常]"})
+                return Seg(
+                    type="image_failed",
+                    data={
+                        "reason": "Processing Error",
+                        "details": str(e_proc),
+                        "url": image_url,
+                    },
+                )
 
         return await asyncio.to_thread(process_image_sync)
 
     except Exception as e:
         logger.error(f"全能图片处理任务发生严重错误: {e}", exc_info=True)
-        return Seg(type="text", data={"text": "[图片处理异常]"})
+        return Seg(
+            type="image_failed",
+            data={
+                "reason": "Unhandled Exception",
+                "details": str(e),
+                "url": image_url,
+            },
+        )
     finally:
         # 5. 清理临时文件
         if temp_image_path and os.path.exists(temp_image_path):
@@ -218,14 +276,16 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
 
 # --- 其他函数 ---
 
-async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> str | None:
-    """下载文件到临时目录并返回路径."""
+async def _download_file_to_temp(
+    url: str, session: aiohttp.ClientSession, headers: dict | None = None
+) -> tuple[str | None, int | None, str | None]:
+    """下载文件到临时目录并返回路径、HTTP状态码和错误原因."""
     try:
-        async with session.get(url) as response:
+        async with session.get(url, headers=headers) as response:
             if response.status == 200:
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
                     temp_file.write(await response.read())
-                    return temp_file.name
+                    return temp_file.name, response.status, None
             else:
                 # 增强日志：记录失败时的HTTP状态码和服务器返回的错误信息
                 error_text = await response.text()
@@ -234,13 +294,22 @@ async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> st
                     f"HTTP状态码: {response.status}, "
                     f"服务器响应: {error_text[:200]}"  # 限制长度避免日志过长
                 )
-                return None
+                return None, response.status, error_text
     except aiohttp.ClientError as e:
-        logger.error(f"下载文件时发生网络客户端错误: {url}, 错误: {e}", exc_info=True)
-        return None
+        # aiohttp.ClientResponseError 提供了 status 和 headers 属性
+        status = getattr(e, 'status', None)
+        headers = getattr(e, 'headers', None)
+        logger.error(
+            f"下载文件时发生网络客户端错误: {url}, "
+            f"Status: {status}, "
+            f"Message: {e}, "
+            f"Headers: {headers}",
+            exc_info=True
+        )
+        return None, status, str(e)
     except Exception as e:
         logger.error(f"下载文件时发生未知异常: {url}, 错误: {e}", exc_info=True)
-        return None
+        return None, None, str(e)
 
 
 async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:

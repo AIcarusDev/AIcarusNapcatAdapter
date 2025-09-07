@@ -223,13 +223,24 @@ async def _download_file_to_temp(url: str, session: aiohttp.ClientSession) -> st
     try:
         async with session.get(url) as response:
             if response.status == 200:
-                # 注意：这里不再强制指定 .gif 后缀，让系统自动处理
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
                     temp_file.write(await response.read())
                     return temp_file.name
+            else:
+                # 增强日志：记录失败时的HTTP状态码和服务器返回的错误信息
+                error_text = await response.text()
+                logger.error(
+                    f"下载文件失败: {url}, "
+                    f"HTTP状态码: {response.status}, "
+                    f"服务器响应: {error_text[:200]}"  # 限制长度避免日志过长
+                )
+                return None
+    except aiohttp.ClientError as e:
+        logger.error(f"下载文件时发生网络客户端错误: {url}, 错误: {e}", exc_info=True)
+        return None
     except Exception as e:
-        logger.error(f"下载动图文件失败: {url}, 错误: {e}", exc_info=True)
-    return None
+        logger.error(f"下载文件时发生未知异常: {url}, 错误: {e}", exc_info=True)
+        return None
 
 
 async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:

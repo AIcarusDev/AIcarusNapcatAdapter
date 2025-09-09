@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from .config import get_config
+from .config import PROJECT_ROOT
 from .logger import logger
 
 
@@ -12,9 +12,7 @@ class MediaCacheManager:
     """负责管理Adapter本地的媒体文件缓存和哈希数据库."""
 
     def __init__(self) -> None:
-        config = get_config()
-        # 项目根目录下的 cache 文件夹
-        self.cache_dir = Path(config.PROJECT_ROOT) / "cache"
+        self.cache_dir = Path(PROJECT_ROOT) / "cache"
         self.images_dir = self.cache_dir / "images"
         self.db_path = self.cache_dir / "media_hashes.sqlite"
         self._lock = asyncio.Lock()

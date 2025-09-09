@@ -7,7 +7,7 @@ import os
 import ssl
 import tempfile
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
@@ -16,10 +16,13 @@ from aicarus_protocols import ConversationType, Seg
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageSequence
 
-from .aic_com_layer import core_connection_client
 from .logger import logger
 from .media_cache_manager import media_cache_manager
 from .message_queue import get_napcat_api_response
+
+if TYPE_CHECKING:
+    from .aic_com_layer import core_connection_client
+
 
 # 基于Gemini官方文档的最佳实践
 MAX_RESOLUTION = (512, 512)

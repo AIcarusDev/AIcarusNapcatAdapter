@@ -129,7 +129,8 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             ) = await _download_file_to_temp(safe_url, session, headers)
             if not temp_image_path or not original_image_bytes:
                 logger.error(
-                    f"图片下载失败. URL: {image_url}, Status: {status_code}, Reason: {error_reason}"
+                    f"图片下载失败. URL: {image_url}, "
+                    f"Status: {status_code}, Reason: {error_reason}"
                 )
                 return Seg(
                     type="image_failed",
@@ -157,47 +158,38 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             nonlocal temp_mp4_path
             try:
                 with Image.open(temp_image_path) as im:
-                    # 3. 检查是否为动图
-                    is_animated = getattr(im, "is_animated", False)
-                    n_frames = getattr(im, "n_frames", 1)
-                    # 增加一个更宽容的判断：即使is_animated为False，但如果帧数大于1，也认为是动图
-                    if not is_animated and n_frames > 1:
-                        logger.warning(
-                            f"Pillow报告is_animated=False，"
-                            f"但检测到 {n_frames} 帧。将尝试按动图处理。"
-                        )
-                        is_animated = True
-
+                    is_animated = (
+                        getattr(im, "is_animated", False)
+                        or getattr(im, "n_frames", 1) > 1
+                    )
                     if is_animated:
-                        # 动图处理逻辑
-                        logger.info(
-                            f"Pillow识别为动图 ({n_frames} 帧)，开始转换为Gemini优化的MP4..."
-                        )
-
+                        logger.info("Pillow识别为动图，开始转换为MP4...")
                         resized_frames = [
-                            np.array(frame
-                                    .convert("RGBA")
-                                    .resize(MAX_RESOLUTION, Image.Resampling.LANCZOS)
-                                    .convert("RGB"))
+                            np.array(
+                                frame
+                                .convert("RGBA")
+                                .resize(MAX_RESOLUTION, Image.Resampling.LANCZOS)
+                                .convert("RGB")
+                            )
                             for frame in ImageSequence.Iterator(im)
                         ]
 
                         if not resized_frames:
                             raise ValueError("未能从动图文件中提取出任何帧。")
 
-                        duration_ms = im.info.get("duration", 100) # 默认10fps
+                        duration_ms = im.info.get("duration", 100)  # 默认10fps
                         source_fps = (
                             1000.0 / duration_ms
                             if isinstance(duration_ms, int) and duration_ms > 0
                             else TARGET_FPS
                         )
                         final_fps = min(source_fps, TARGET_FPS)
-                        total_duration = min(len(resized_frames) / final_fps, MAX_DURATION_SECONDS)
-
-                        clip = ImageSequenceClip(
-                            resized_frames, fps=final_fps
-                        ).set_duration(total_duration)
-
+                        total_duration = min(
+                            len(resized_frames) / final_fps, MAX_DURATION_SECONDS
+                        )
+                        clip = ImageSequenceClip(resized_frames, fps=final_fps).set_duration(
+                            total_duration
+                        )
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
                             temp_mp4_path = temp_f.name
 
@@ -276,8 +268,8 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             data={
                 "reason": "Unhandled Exception",
                 "details": str(e),
-                "url": image_url,
-            },
+                "url": image_url
+            }
         )
     finally:
         # 8. 清理临时文件
@@ -291,38 +283,37 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
 
 async def _download_file_to_temp(
     url: str, session: aiohttp.ClientSession, headers: dict | None = None
-) -> tuple[str | None, int | None, str | None]:
-    """下载文件到临时目录并返回路径、HTTP状态码和错误原因."""
+) -> tuple[str | None, bytes | None, int | None, str | None]:
+    """下载文件到临时目录并返回路径、原始字节、HTTP状态码和错误原因."""
     try:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
+                content_bytes = await response.read()
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".tmp") as temp_file:
-                    temp_file.write(await response.read())
-                    return temp_file.name, response.status, None
+                    temp_file.write(content_bytes)
+                    return (
+                        temp_file.name,
+                        content_bytes,
+                        response.status,
+                        None,
+                    )
             else:
-                # 增强日志：记录失败时的HTTP状态码和服务器返回的错误信息
                 error_text = await response.text()
                 logger.error(
-                    f"下载文件失败: {url}, "
-                    f"HTTP状态码: {response.status}, "
-                    f"服务器响应: {error_text[:200]}"  # 限制长度避免日志过长
+                    f"下载文件失败: {url}, HTTP状态码: {response.status}, "
+                    f"服务器响应: {error_text[:200]}"
                 )
-                return None, response.status, error_text
+                return None, None, response.status, error_text
     except aiohttp.ClientError as e:
-        # aiohttp.ClientResponseError 提供了 status 和 headers 属性
         status = getattr(e, 'status', None)
-        headers = getattr(e, 'headers', None)
         logger.error(
-            f"下载文件时发生网络客户端错误: {url}, "
-            f"Status: {status}, "
-            f"Message: {e}, "
-            f"Headers: {headers}",
-            exc_info=True
+            f"下载文件时发生网络客户端错误: {url}, Status: {status}, Message: {e}",
+            exc_info=True,
         )
-        return None, status, str(e)
+        return None, None, status, str(e)
     except Exception as e:
         logger.error(f"下载文件时发生未知异常: {url}, 错误: {e}", exc_info=True)
-        return None, None, str(e)
+        return None, None, None, str(e)
 
 
 async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:

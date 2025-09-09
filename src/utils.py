@@ -21,7 +21,7 @@ from .media_cache_manager import media_cache_manager
 from .message_queue import get_napcat_api_response
 
 if TYPE_CHECKING:
-    from .aic_com_layer import core_connection_client
+    pass
 
 
 # 基于Gemini官方文档的最佳实践
@@ -87,6 +87,9 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
     - 如果是动图，转换为MP4。
     - 返回一个包含所有必要信息的 image, video, 或 image_failed Seg。
     """
+    # 特殊情况：在函数内部进行运行时导入
+    from .aic_com_layer import core_connection_client
+
     logger.info(f"启动全能图片处理任务, URL: {image_url}")
     temp_image_path: str | None = None
     temp_mp4_path: str | None = None

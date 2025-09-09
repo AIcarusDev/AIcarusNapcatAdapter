@@ -26,6 +26,7 @@ from .config import (
 
 # 项目内部模块
 from .logger import logger
+from .media_cache_manager import media_cache_manager
 
 # 从新的消息队列模块导入 (如果 napcat_event_processor 仍使用它)
 from .message_queue import (
@@ -115,7 +116,7 @@ async def napcat_message_receiver(
 
 async def napcat_event_processor() -> None:
     """从内部队列中取出 Napcat 事件并分发给 RecvHandlerAicarus 的统一入口."""
-    logger.info("Napcat 事件处理器已启动，等待处理事件... (工厂模式)")
+    logger.info("Napcat 事件处理器已启动，等待处理事件... ")
     while True:
         napcat_event = await internal_event_queue.get()
         try:
@@ -179,6 +180,9 @@ async def main() -> None:
     # 启动过期 API 响应检查器（异步任务）
     logger.info("启动过期 API 响应检查器...")
     stale_check_task = asyncio.create_task(check_stale_api_responses_periodically())
+
+    # 初始化媒体缓存管理器
+    await media_cache_manager.initialize()
 
     # 启动 WebSocket 服务器等待 Napcat 连接（这会阻塞）
     try:

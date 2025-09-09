@@ -1,5 +1,8 @@
 # aicarus_napcat_adapter/src/send_handler_aicarus.py (v3.0 重构版)
+import base64
 import json
+import os
+import sqlite3
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -9,12 +12,12 @@ import websockets
 # AIcarus 协议库
 from aicarus_protocols import Event, EventBuilder, Seg, find_seg_by_type
 
-# 哼哼，从我们重构好的新世界里导入！
 from .action_definitions import ACTION_MAPPING, COMPLEX_ACTION_HANDLERS
 from .action_register import pending_actions
+from .logger import logger
 
 # 内部模块
-from .logger import logger
+from .media_cache_manager import media_cache_manager
 from .message_queue import get_napcat_api_response
 from .napcat_definitions import NapcatSegType
 from .recv_handler_aicarus import recv_handler_aicarus
@@ -239,6 +242,9 @@ class SendHandlerAicarus:
             else:
                 params = params_seg.data
 
+            if action_alias == "media.get":
+                return await self._handle_media_get_action(params)
+
             #  如果 params 里没有 group_id 或 user_id，就尝试从 event 的上下文中补全。
             if event.conversation_info:
                 if "group_id" not in params and event.conversation_info.type == "group":
@@ -287,6 +293,42 @@ class SendHandlerAicarus:
         except Exception as e:
             logger.error(f"执行动作 '{action_alias}' 时，发生异常: {e}", exc_info=True)
             return False, f"执行动作时出现异常: {e}", {}
+
+    async def _handle_media_get_action(self, params: dict) -> tuple[bool, str, dict[str, Any]]:
+        """处理来自Core的媒体文件获取请求."""
+        content_hash = params.get("hash")
+        if not content_hash:
+            return False, "请求媒体失败：缺少 'hash' 参数。", {}
+
+        logger.info(f"收到Core的媒体请求，哈希: {content_hash[:10]}...")
+        file_path_str = await media_cache_manager.get_file_path_by_hash(content_hash)
+
+        if file_path_str and os.path.exists(file_path_str):
+            try:
+                with open(file_path_str, "rb") as f:
+                    file_bytes = f.read()
+
+                # 从SQLite获取MIME类型
+                conn = sqlite3.connect(media_cache_manager.db_path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT mime_type FROM media_cache WHERE hash = ?", (content_hash,))
+                result = cursor.fetchone()
+                conn.close()
+                mime_type = result[0] if result else "application/octet-stream"
+
+                b64_data = base64.b64encode(file_bytes).decode('utf-8')
+                logger.success(f"已找到哈希 {content_hash[:10]}... 对应的文件，正在返回Base64。")
+                return True, "媒体文件获取成功", {
+                    "hash": content_hash,
+                    "base64": b64_data,
+                    "mime_type": mime_type,
+                }
+            except Exception as e:
+                logger.error(f"读取媒体缓存文件 {file_path_str} 失败: {e}")
+                return False, f"读取媒体缓存文件失败: {e}", {}
+        else:
+            logger.warning(f"Core请求了一个Adapter本地不存在的哈希: {content_hash}")
+            return False, "媒体文件在Adapter端未找到。", {}
 
     async def _handle_send_message_action(
         self, aicarus_event: Event

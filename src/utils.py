@@ -8,15 +8,17 @@ import ssl
 import tempfile
 import uuid
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit, quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
 import numpy as np
-from aicarus_protocols import ConversationType, Seg  # [MODIFIED] 导入 Seg
+from aicarus_protocols import ConversationType, Seg
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PIL import Image, ImageSequence
 
+from .aic_com_layer import core_connection_client
 from .logger import logger
+from .media_cache_manager import media_cache_manager
 from .message_queue import get_napcat_api_response
 
 # 基于Gemini官方文档的最佳实践
@@ -74,21 +76,24 @@ async def _call_napcat_api(
 
 # --- [NEW] 全能图片处理器 ---
 async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None = None) -> Seg:
-    """下载并处理一个图片URL，智能判断其为动图还是静态图，并返回相应的AIcarus Seg.
+    """下载并处理一个图片URL，集成哈希计算、本地缓存和按需发送逻辑.
 
-    - 如果是动图，转换为MP4并返回 'video' Seg。
-    - 如果是静态图，返回带有Base64的 'image' Seg。
-    - 如果失败，返回 'text' Seg。
+    - 为原始文件内容计算SHA256哈希。
+    - 使用 media_cache_manager 将文件存入本地缓存，并记录哈希。
+    - 检查哈希是否已发送过，决定是否在Seg中包含Base64数据。
+    - 如果是动图，转换为MP4。
+    - 返回一个包含所有必要信息的 image, video, 或 image_failed Seg。
     """
     logger.info(f"启动全能图片处理任务, URL: {image_url}")
-    temp_image_path = None
-    temp_mp4_path = None
+    temp_image_path: str | None = None
+    temp_mp4_path: str | None = None
+    original_image_bytes: bytes | None = None
 
     ssl_context = ssl.create_default_context()
     ssl_context.set_ciphers("DEFAULT@SECLEVEL=1")
 
     try:
-        # [NEW] 4.1. 增加 URL 规范化与预处理
+        # 1. URL 规范化
         try:
             parts = urlsplit(image_url)
             path = quote(parts.path)
@@ -107,7 +112,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                 },
             )
 
-        # 模拟客户端请求，增强伪装
+        # 2. 下载原始文件
         headers = {
             "User-Agent": "QQ/9.7.13.29121",
             "Referer": "https://c.tenpay.com/",
@@ -116,10 +121,13 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
         async with aiohttp.ClientSession(
             connector=aiohttp.TCPConnector(ssl=ssl_context)
         ) as session:
-            temp_image_path, status_code, error_reason = await _download_file_to_temp(
-                safe_url, session, headers
-            )
-            if not temp_image_path:
+            (
+                temp_image_path,
+                original_image_bytes,
+                status_code,
+                error_reason,
+            ) = await _download_file_to_temp(safe_url, session, headers)
+            if not temp_image_path or not original_image_bytes:
                 logger.error(
                     f"图片下载失败. URL: {image_url}, Status: {status_code}, Reason: {error_reason}"
                 )
@@ -132,7 +140,19 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                     },
                 )
 
-        # 2. 在线程中进行同步的、阻塞的Pillow和moviepy处理
+        # 3. 保存到媒体缓存并获取哈希
+        content_type = await get_content_type_from_url(safe_url) or "application/octet-stream"
+        content_hash, _ = await media_cache_manager.save_media(original_image_bytes, content_type)
+        logger.info(f"媒体文件已保存至本地缓存，哈希: {content_hash[:10]}...")
+
+        # 4. 决定是否需要发送Base64
+        should_send_base64 = not core_connection_client.is_hash_sent(content_hash)
+        if should_send_base64:
+            logger.info(f"哈希 {content_hash[:10]}... 是首次发送给Core，将包含Base64数据。")
+        else:
+            logger.info(f"哈希 {content_hash[:10]}... 已发送过，本次只发送哈希。")
+
+        # 5. 在线程中进行耗时的图像处理
         def process_image_sync() -> Seg:
             nonlocal temp_mp4_path
             try:
@@ -154,39 +174,29 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                             f"Pillow识别为动图 ({n_frames} 帧)，开始转换为Gemini优化的MP4..."
                         )
 
-                        resized_frames = []
-                        for frame in ImageSequence.Iterator(im):
-                            frame_rgba = frame.convert("RGBA")
-                            frame_rgba.thumbnail(MAX_RESOLUTION, Image.Resampling.LANCZOS)
-                            frame_rgb = np.array(frame_rgba.convert("RGB"))
-                            resized_frames.append(frame_rgb)
+                        resized_frames = [
+                            np.array(frame
+                                    .convert("RGBA")
+                                    .resize(MAX_RESOLUTION, Image.Resampling.LANCZOS)
+                                    .convert("RGB"))
+                            for frame in ImageSequence.Iterator(im)
+                        ]
 
                         if not resized_frames:
-                            logger.warning("未能从动图文件中提取出任何帧。")
-                            return Seg(
-                                type="image_failed",
-                                data={
-                                    "reason": "Processing Error",
-                                    "details": "Could not extract frames from animated image.",
-                                    "url": image_url,
-                                },
-                            )
+                            raise ValueError("未能从动图文件中提取出任何帧。")
 
-                        # 计算原始帧率
-                        source_fps = TARGET_FPS
-                        if "duration" in im.info:
-                            duration_ms = im.info.get("duration")
-                            if isinstance(duration_ms, int) and duration_ms > 0:
-                                source_fps = 1000.0 / duration_ms
-
-                        # 最终帧率不超过我们的目标值
+                        duration_ms = im.info.get("duration", 100) # 默认10fps
+                        source_fps = (
+                            1000.0 / duration_ms
+                            if isinstance(duration_ms, int) and duration_ms > 0
+                            else TARGET_FPS
+                        )
                         final_fps = min(source_fps, TARGET_FPS)
-
-                        # 计算并限制总时长
                         total_duration = min(len(resized_frames) / final_fps, MAX_DURATION_SECONDS)
 
-                        clip = ImageSequenceClip(resized_frames, fps=final_fps)
-                        clip = clip.set_duration(total_duration)
+                        clip = ImageSequenceClip(
+                            resized_frames, fps=final_fps
+                        ).set_duration(total_duration)
 
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
                             temp_mp4_path = temp_f.name
@@ -210,39 +220,35 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                         with open(temp_mp4_path, "rb") as mp4_file:
                             mp4_bytes = mp4_file.read()
 
-                        file_kb_size = len(mp4_bytes) / 1024
-                        logger.success(
-                            f"动图成功转换为优化MP4, 分辨率: <={MAX_RESOLUTION}, "
-                            f"FPS: {final_fps:.2f}, "
-                            f"时长: {total_duration:.2f}s, "
-                            f"大小: {file_kb_size:.2f} KB"
-                        )
+                        logger.success(f"动图成功转换为MP4, 大小: {len(mp4_bytes)/1024:.2f} KB")
 
-                        return Seg(
-                            type="video",
-                            data={
-                                "summary": "animated_sticker",
-                                "base64": base64.b64encode(mp4_bytes).decode("utf-8"),
-                                "mime_type": "video/mp4",
-                                "file_id": file_id,
-                            },
-                        )
+                        seg_data = {
+                            "summary": "animated_sticker",
+                            "mime_type": "video/mp4",
+                            "file_id": file_id,
+                            "hash": content_hash,
+                            "url": image_url,
+                        }
+                        if should_send_base64:
+                            seg_data["base64"] = base64.b64encode(mp4_bytes).decode("utf-8")
+
+                        return Seg(type="video", data=seg_data)
                     else:
-                        # 4. 如果是静态图
-                        logger.info("Pillow识别为静态图，进行Base64编码。")
-                        with open(temp_image_path, "rb") as f:
-                            image_bytes = f.read()
+                        # 静态图处理逻辑
+                        logger.info("Pillow识别为静态图。")
+                        seg_data = {
+                            "summary": "image",
+                            "mime_type": content_type,
+                            "url": image_url,
+                            "file_id": file_id,
+                            "hash": content_hash,
+                        }
+                        if should_send_base64:
+                            seg_data["base64"] = base64.b64encode(
+                                original_image_bytes
+                            ).decode("utf-8")
 
-                        return Seg(
-                            type="image",
-                            data={
-                                "url": image_url,
-                                "file_id": file_id,
-                                "base64": base64.b64encode(image_bytes).decode("utf-8"),
-                                "summary": "image",
-                            },
-                        )
-
+                        return Seg(type="image", data=seg_data)
             except Exception as e_proc:
                 logger.error(f"处理图片文件时发生内部错误: {e_proc}", exc_info=True)
                 return Seg(
@@ -250,11 +256,18 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                     data={
                         "reason": "Processing Error",
                         "details": str(e_proc),
-                        "url": image_url,
-                    },
+                        "url": image_url
+                    }
                 )
 
-        return await asyncio.to_thread(process_image_sync)
+        # 6. 执行同步处理并获取最终的Seg
+        final_seg = await asyncio.to_thread(process_image_sync)
+
+        # 7. 如果成功发送了Base64，则标记
+        if should_send_base64 and final_seg.type != "image_failed":
+            core_connection_client.mark_hash_as_sent(content_hash)
+
+        return final_seg
 
     except Exception as e:
         logger.error(f"全能图片处理任务发生严重错误: {e}", exc_info=True)
@@ -267,7 +280,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             },
         )
     finally:
-        # 5. 清理临时文件
+        # 8. 清理临时文件
         if temp_image_path and os.path.exists(temp_image_path):
             os.remove(temp_image_path)
         if temp_mp4_path and os.path.exists(temp_mp4_path):

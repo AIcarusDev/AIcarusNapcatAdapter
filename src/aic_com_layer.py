@@ -41,6 +41,16 @@ class CoreConnectionClient:
         self.heartbeat_interval: int = 30
         self.napcat_server_connection: Any | None = None
         self.bot_profile_cache: dict[str, Any] | None = None # 用于缓存档案数据
+        self._sent_hashes_to_core: set[str] = set()  # 用于跟踪已发送的媒体哈希值
+
+    def is_hash_sent(self, content_hash: str) -> bool:
+        """检查一个哈希是否已经发送给Core."""
+        return content_hash in self._sent_hashes_to_core
+
+    def mark_hash_as_sent(self, content_hash: str) -> None:
+        """标记一个哈希已经发送给Core."""
+        self._sent_hashes_to_core.add(content_hash)
+        logger.debug(f"哈希 {content_hash[:10]}... 已标记为发送过。")
 
     def set_napcat_server_connection(self, napcat_connection: Any) -> None:
         """从外部设置 Napcat 服务器的连接实例."""
@@ -68,6 +78,7 @@ class CoreConnectionClient:
             )
             self.websocket = await websockets.connect(self.core_ws_url)
             logger.info(f"已成功连接到 Core WebSocket 服务器: {self.core_ws_url}")
+            self._sent_hashes_to_core.clear()
 
             # --- 核心修改 2：在此处主动获取并缓存档案 ---
             if self.napcat_server_connection:

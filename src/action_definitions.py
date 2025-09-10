@@ -142,7 +142,7 @@ class GetBotProfileHandler(BaseComplexActionHandler):
             return False, "无法获取机器人自身的基础信息。", {}
 
         bot_id = str(self_info["user_id"])
-        bot_nickname = self_info.get("nickname", "未知昵称")
+        bot_nickname = self_info.get("nickname")
 
         # 2. 获取机器人所在的群列表
         group_list = await utils.napcat_get_list(connection, list_type="group")
@@ -173,7 +173,7 @@ class GetBotProfileHandler(BaseComplexActionHandler):
             else:
                 groups_details[group_id] = {
                     "group_id": group_id,
-                    "group_name": group.get("group_name", "未知群名"),
+                    "group_name": group.get("group_name"),
                     "card": "",
                     "role": "member",
                     "title": "",

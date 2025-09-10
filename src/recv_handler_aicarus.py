@@ -185,7 +185,7 @@ class RecvHandlerAicarus:
 
             elif seg_type == NapcatSegType.face:
                 face_id = seg_data.get("id")
-                face_name = qq_face.get(face_id, f"[未知表情:{face_id}]")
+                face_name = qq_face.get(face_id)
                 aicarus_s = Seg(type="face", data={"id": face_id, "name": face_name})
 
             # [MODIFIED] 统一图片处理逻辑

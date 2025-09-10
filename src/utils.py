@@ -6,6 +6,7 @@ import json
 import os
 import ssl
 import tempfile
+import io # 新增导入
 import uuid
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -148,7 +149,37 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                 )
 
         # 3. 保存到媒体缓存并获取哈希
-        content_type = await get_content_type_from_url(safe_url) or "application/octet-stream"
+        content_type = await get_content_type_from_url(safe_url)
+        
+        # 如果通过HEAD请求未能获取到Content-Type，尝试使用Pillow从文件内容中猜测
+        if not content_type and original_image_bytes:
+            try:
+                with Image.open(io.BytesIO(original_image_bytes)) as img:
+                    # Pillow的format属性通常是文件扩展名，需要映射到MIME类型
+                    img_format = img.format.lower()
+                    if img_format == "jpeg":
+                        content_type = "image/jpeg"
+                    elif img_format == "png":
+                        content_type = "image/png"
+                    elif img_format == "gif":
+                        content_type = "image/gif"
+                    elif img_format == "webp":
+                        content_type = "image/webp"
+                    elif img_format == "bmp":
+                        content_type = "image/bmp"
+                    # 可以根据需要添加更多格式映射
+                    if content_type:
+                        logger.info(f"process_image_url_to_aicarus_seg: 通过Pillow从文件内容猜测到Content-Type: {content_type}。URL: {safe_url}")
+                    else:
+                        logger.warning(f"process_image_url_to_aicarus_seg: Pillow未能从文件内容猜测到Content-Type ({img_format})。URL: {safe_url}")
+            except Exception as e:
+                logger.warning(f"process_image_url_to_aicarus_seg: 使用Pillow猜测Content-Type时发生错误: {e}。URL: {safe_url}")
+
+        if not content_type:
+            logger.warning(f"process_image_url_to_aicarus_seg: 最终未能获取到Content-Type，将使用默认值 'application/octet-stream'。原始URL: {safe_url}")
+            content_type = "application/octet-stream"
+        
+        logger.debug(f"process_image_url_to_aicarus_seg: 准备保存媒体文件，最终确定的Content-Type: {content_type}, URL: {safe_url}")
         content_hash, _ = await media_cache_manager.save_media(original_image_bytes, content_type)
         logger.info(f"媒体文件已保存至本地缓存，哈希: {content_hash[:10]}...")
 
@@ -337,18 +368,24 @@ async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
         ):
             # 使用 HEAD 请求，只获取响应头，不下载文件体，非常高效
             if response.status == 200:
-                content_type = response.headers.get("Content-Type")
-                if content_type:
+                raw_content_type = response.headers.get("Content-Type")
+                logger.debug(f"get_content_type_from_url: URL: {url}, HTTP Status: {response.status}, Raw Content-Type Header: {raw_content_type}")
+                if raw_content_type:
                     # 清理掉可能存在的 charset 等附加信息
-                    return content_type.split(";")[0].strip()
+                    cleaned_content_type = raw_content_type.split(";")[0].strip()
+                    logger.debug(f"get_content_type_from_url: URL: {url}, Cleaned Content-Type: {cleaned_content_type}")
+                    return cleaned_content_type
                 else:
-                    logger.warning(f"获取 Content-Type 失败 (HTTP {response.status}): {url}")
+                    logger.warning(f"get_content_type_from_url: 获取 Content-Type 失败 (HTTP {response.status}): {url}，响应头中未找到 Content-Type。将返回 None。")
                     return None
+            else:
+                logger.warning(f"get_content_type_from_url: 获取 Content-Type 失败 (HTTP {response.status}): {url}。将返回 None。")
+                return None
     except TimeoutError:
-        logger.warning(f"获取 Content-Type 超时: {url}")
+        logger.warning(f"get_content_type_from_url: 获取 Content-Type 超时: {url}")
         return None
     except Exception as e:
-        logger.error(f"获取 Content-Type 时发生未知错误 (URL: {url}): {e}")
+        logger.error(f"get_content_type_from_url: 获取 Content-Type 时发生未知错误 (URL: {url}): {e}", exc_info=True)
         return None
 
 

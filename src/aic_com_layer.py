@@ -36,7 +36,7 @@ class CoreConnectionClient:
         self._receive_task: asyncio.Task | None = None
         self._heartbeat_task: asyncio.Task | None = None
         self._is_running: bool = False
-        self._reconnect_delay: int = 5
+        self._reconnect_delay: int = 0.8  # 重连延迟，单位秒
         self._on_event_from_core_callback: CoreEventCallback | None = None
         self.heartbeat_interval: int = 30
         self.napcat_server_connection: Any | None = None

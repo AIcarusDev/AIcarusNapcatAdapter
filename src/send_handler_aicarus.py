@@ -183,6 +183,10 @@ class SendHandlerAicarus:
                 if converter := self.SEGMENT_CONVERTERS.get(seg.type):
                     if napcat_seg := converter(seg):
                         napcat_message_array.append(napcat_seg)
+                        if seg.type == "at":
+                            napcat_message_array.append(
+                                {"type": "text", "data": {"text": " "}}
+                            )
                 else:
                     logger.warning(
                         f"发送处理器: 适配器不知道如何处理这个Seg类型: {seg.type}, 数据: {seg.data}"

@@ -202,7 +202,15 @@ class RecvHandlerAicarus:
 
             elif seg_type == NapcatSegType.at:
                 qq_num = seg_data.get("qq")
-                display_name = f"@{qq_num}" if qq_num and qq_num != "all" else "@全体成员"
+                # 优先使用Napcat提供的name，因为它可能包含更准确的群昵称
+                display_name = seg_data.get("name")
+                if not display_name:
+                    display_name = f"@{qq_num}" if qq_num and str(qq_num) != "all" else "@全体成员"
+                else:
+                    # 确保它总是以@开头
+                    if not display_name.startswith('@'):
+                        display_name = f"@{display_name}"
+
                 aicarus_s = Seg(
                     type="at",
                     data={

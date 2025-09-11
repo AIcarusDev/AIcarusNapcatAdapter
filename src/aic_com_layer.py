@@ -40,7 +40,7 @@ class CoreConnectionClient:
         self._on_event_from_core_callback: CoreEventCallback | None = None
         self.heartbeat_interval: int = 30
         self.napcat_server_connection: Any | None = None
-        self.bot_profile_cache: dict[str, Any] | None = None # 用于缓存档案数据
+        self.bot_profile_cache: dict[str, Any] | None = None  # 用于缓存档案数据
         self._sent_hashes_to_core: set[str] = set()  # 用于跟踪已发送的媒体哈希值
 
     def is_hash_sent(self, content_hash: str) -> bool:
@@ -173,8 +173,7 @@ class CoreConnectionClient:
                                 "lifecycle_type": "ready",
                                 "details": {
                                     "message": (
-                                        "Adapter is fully initialized and "
-                                        "ready for inspection."
+                                        "Adapter is fully initialized and ready for inspection."
                                     ),
                                     # --- 在此处附加上缓存的档案 ---
                                     "profile_data": self.bot_profile_cache,

@@ -208,7 +208,7 @@ class RecvHandlerAicarus:
                     display_name = f"@{qq_num}" if qq_num and str(qq_num) != "all" else "@全体成员"
                 else:
                     # 确保它总是以@开头
-                    if not display_name.startswith('@'):
+                    if not display_name.startswith("@"):
                         display_name = f"@{display_name}"
 
                 aicarus_s = Seg(

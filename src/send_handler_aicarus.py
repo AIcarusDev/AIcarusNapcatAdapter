@@ -184,9 +184,7 @@ class SendHandlerAicarus:
                     if napcat_seg := converter(seg):
                         napcat_message_array.append(napcat_seg)
                         if seg.type == "at":
-                            napcat_message_array.append(
-                                {"type": "text", "data": {"text": " "}}
-                            )
+                            napcat_message_array.append({"type": "text", "data": {"text": " "}})
                 else:
                     logger.warning(
                         f"发送处理器: 适配器不知道如何处理这个Seg类型: {seg.type}, 数据: {seg.data}"
@@ -320,13 +318,17 @@ class SendHandlerAicarus:
                 conn.close()
                 mime_type = result[0] if result else "application/octet-stream"
 
-                b64_data = base64.b64encode(file_bytes).decode('utf-8')
+                b64_data = base64.b64encode(file_bytes).decode("utf-8")
                 logger.success(f"已找到哈希 {content_hash[:10]}... 对应的文件，正在返回Base64。")
-                return True, "媒体文件获取成功", {
-                    "hash": content_hash,
-                    "base64": b64_data,
-                    "mime_type": mime_type,
-                }
+                return (
+                    True,
+                    "媒体文件获取成功",
+                    {
+                        "hash": content_hash,
+                        "base64": b64_data,
+                        "mime_type": mime_type,
+                    },
+                )
             except Exception as e:
                 logger.error(f"读取媒体缓存文件 {file_path_str} 失败: {e}")
                 return False, f"读取媒体缓存文件失败: {e}", {}

@@ -113,10 +113,16 @@ class MessageEventFactory(BaseEventFactory):
             napcat_event.get("message", []), napcat_event
         )
         if not message_segs:
-            logger.warning(f"MessageEventFactory: 未能从Napcat事件中解析出任何消息段。事件ID: {napcat_event.get('message_id')}")
+            logger.warning(
+                f"MessageEventFactory: 未能从Napcat事件中解析出任何消息段。"
+                f"事件ID: {napcat_event.get('message_id')}"
+            )
             return None
         content_segs.extend(message_segs)
-        logger.debug(f"MessageEventFactory: 最终构建的 content_segs: {[seg.to_dict() for seg in content_segs]}")
+        logger.debug(
+            f"MessageEventFactory: "
+            f"最终构建的 content_segs: {[seg.to_dict() for seg in content_segs]}"
+        )
 
         # --- 3: 构造全新的Event，platform字段已被彻底阉割！ ---
         return Event(

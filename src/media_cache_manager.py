@@ -93,9 +93,10 @@ class MediaCacheManager:
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT OR IGNORE INTO media_cache (hash, file_path, mime_type) VALUES (?, ?, ?)",
-                (content_hash, str(file_path.resolve()), mime_type)
+                (content_hash, str(file_path.resolve()), mime_type),
             )
             conn.commit()
+
 
 # 创建一个全局实例
 media_cache_manager = MediaCacheManager()

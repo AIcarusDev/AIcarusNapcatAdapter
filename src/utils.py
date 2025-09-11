@@ -104,7 +104,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
         try:
             parts = urlsplit(image_url)
             path = quote(parts.path)
-            query = quote(parts.query, safe='=&')
+            query = quote(parts.query, safe="=&")
             safe_url = urlunsplit((parts.scheme, parts.netloc, path, query, parts.fragment))
             if safe_url != image_url:
                 logger.debug(f"URL 已规范化: {image_url} -> {safe_url}")
@@ -136,8 +136,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             ) = await _download_file_to_temp(safe_url, session, headers)
             if not temp_image_path or not original_image_bytes:
                 logger.error(
-                    f"图片下载失败. URL: {image_url}, "
-                    f"Status: {status_code}, Reason: {error_reason}"
+                    f"图片下载失败. URL: {image_url}, Status: {status_code}, Reason: {error_reason}"
                 )
                 return Seg(
                     type="image_failed",
@@ -212,15 +211,13 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
             try:
                 with Image.open(temp_image_path) as im:
                     is_animated = (
-                        getattr(im, "is_animated", False)
-                        or getattr(im, "n_frames", 1) > 1
+                        getattr(im, "is_animated", False) or getattr(im, "n_frames", 1) > 1
                     )
                     if is_animated:
                         logger.info("Pillow识别为动图，开始转换为MP4...")
                         resized_frames = [
                             np.array(
-                                frame
-                                .convert("RGBA")
+                                frame.convert("RGBA")
                                 .resize(MAX_RESOLUTION, Image.Resampling.LANCZOS)
                                 .convert("RGB")
                             )
@@ -237,9 +234,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                             else TARGET_FPS
                         )
                         final_fps = min(source_fps, TARGET_FPS)
-                        total_duration = min(
-                            len(resized_frames) / final_fps, MAX_DURATION_SECONDS
-                        )
+                        total_duration = min(len(resized_frames) / final_fps, MAX_DURATION_SECONDS)
                         clip = ImageSequenceClip(resized_frames, fps=final_fps).set_duration(
                             total_duration
                         )
@@ -265,7 +260,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                         with open(temp_mp4_path, "rb") as mp4_file:
                             mp4_bytes = mp4_file.read()
 
-                        logger.success(f"动图成功转换为MP4, 大小: {len(mp4_bytes)/1024:.2f} KB")
+                        logger.success(f"动图成功转换为MP4, 大小: {len(mp4_bytes) / 1024:.2f} KB")
 
                         seg_data = {
                             "summary": "animated_sticker",
@@ -289,20 +284,16 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                             "hash": content_hash,
                         }
                         if should_send_base64:
-                            seg_data["base64"] = base64.b64encode(
-                                original_image_bytes
-                            ).decode("utf-8")
+                            seg_data["base64"] = base64.b64encode(original_image_bytes).decode(
+                                "utf-8"
+                            )
 
                         return Seg(type="image", data=seg_data)
             except Exception as e_proc:
                 logger.error(f"处理图片文件时发生内部错误: {e_proc}", exc_info=True)
                 return Seg(
                     type="image_failed",
-                    data={
-                        "reason": "Processing Error",
-                        "details": str(e_proc),
-                        "url": image_url
-                    }
+                    data={"reason": "Processing Error", "details": str(e_proc), "url": image_url},
                 )
 
         # 6. 执行同步处理并获取最终的Seg
@@ -318,11 +309,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
         logger.error(f"全能图片处理任务发生严重错误: {e}", exc_info=True)
         return Seg(
             type="image_failed",
-            data={
-                "reason": "Unhandled Exception",
-                "details": str(e),
-                "url": image_url
-            }
+            data={"reason": "Unhandled Exception", "details": str(e), "url": image_url},
         )
     finally:
         # 8. 清理临时文件
@@ -333,6 +320,7 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
 
 
 # --- 其他函数 ---
+
 
 async def _download_file_to_temp(
     url: str, session: aiohttp.ClientSession, headers: dict | None = None
@@ -358,7 +346,7 @@ async def _download_file_to_temp(
                 )
                 return None, None, response.status, error_text
     except aiohttp.ClientError as e:
-        status = getattr(e, 'status', None)
+        status = getattr(e, "status", None)
         logger.error(
             f"下载文件时发生网络客户端错误: {url}, Status: {status}, Message: {e}",
             exc_info=True,
@@ -417,11 +405,11 @@ async def get_content_type_from_url(url: str, timeout: int = 5) -> str | None:
         return None
     except Exception as e:
         logger.error(
-            "get_content_type_from_url: 获取 Content-Type 时发生未知错误 "
-            f"(URL: {url}): {e}",
+            f"get_content_type_from_url: 获取 Content-Type 时发生未知错误 (URL: {url}): {e}",
             exc_info=True,
         )
         return None
+
 
 async def napcat_get_self_info(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """获取当前登录用户的信息."""
@@ -786,6 +774,7 @@ async def napcat_get_forward_msg_content(
         )
     return None
 
+
 async def napcat_get_bot_profile_for_core(
     server_connection: Any, **kwargs: Any
 ) -> dict[str, Any] | None:
@@ -806,16 +795,16 @@ async def napcat_get_bot_profile_for_core(
         return None
 
     # 将群聊列表转换为 Napcat API 返回的那种以 group_id 为键的字典格式
-    groups_dict = {
-        str(group.get("group_id", "")): group for group in groups_list
-    } if groups_list else {}
+    groups_dict = (
+        {str(group.get("group_id", "")): group for group in groups_list} if groups_list else {}
+    )
 
     # 组装成 Core 需要的最终格式
     full_profile = {
         "user_id": profile_data.get("user_id"),
         "user_nickname": profile_data.get("nickname"),
         "friends": friends_list if friends_list else [],
-        "groups": groups_dict
+        "groups": groups_dict,
     }
 
     logger.info(

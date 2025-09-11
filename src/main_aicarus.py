@@ -42,9 +42,7 @@ from .send_handler_aicarus import send_handler_aicarus
 # recv_handler_aicarus 实例已在其模块中创建并导入，此处无需再创建
 
 
-async def napcat_message_receiver(
-    websocket: websockets.WebSocketServerProtocol, path: str
-) -> None:
+async def napcat_message_receiver(websocket: websockets.WebSocketServerProtocol, path: str) -> None:
     """处理来自 Napcat 的连接和消息，并将消息分发给 RecvHandlerAicarus."""
     logger.info(f"Napcat 客户端已连接: {websocket.remote_address}")
 
@@ -53,7 +51,6 @@ async def napcat_message_receiver(
 
     recv_handler_aicarus.server_connection = websocket
     send_handler_aicarus.server_connection = websocket
-
 
     # ------------------ 1: 接入 Core ------------------
     # 在确认QQ已连接后，我们才开始启动与Core的连接

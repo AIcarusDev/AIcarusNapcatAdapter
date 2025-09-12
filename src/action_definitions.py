@@ -255,6 +255,7 @@ ACTION_MAPPING: dict[str, ActionMappingType] = {
     "get_stranger_info": (utils.napcat_get_stranger_info, ["user_id"]),
     "get_list": (utils.napcat_get_list, ["list_type"]),
     "get_history": (utils.napcat_get_history, ["conversation_id", "conversation_type"]),
+    "get_group_member_list": (utils.napcat_get_group_member_list, ["group_id"]),
     # --- 文件操作 ---
     "upload_group_file": (utils.napcat_upload_group_file, ["group_id", "file", "name"]),
     "delete_group_file": (

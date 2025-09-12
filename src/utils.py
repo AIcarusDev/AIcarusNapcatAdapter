@@ -813,3 +813,17 @@ async def napcat_get_bot_profile_for_core(
         f"{len(full_profile['groups'])} 个群聊的完整档案。"
     )
     return full_profile
+
+# 获取完整群成员列表的函数
+async def napcat_get_group_member_list(
+    server_connection: Any, **kwargs: Any
+) -> dict[str, Any] | None:
+    """获取完整的群成员列表."""
+    params = {
+        "group_id": int(kwargs["group_id"]),
+        "no_cache": kwargs.get("no_cache", True),  # 默认强制刷新，获取最新列表
+    }
+    # 获取完整列表可能耗时较长，我们可以给一个更长的超时时间
+    return await _call_napcat_api(
+        server_connection, "get_group_member_list", params, timeout_seconds=45.0
+    )

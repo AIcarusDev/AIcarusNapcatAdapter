@@ -235,9 +235,8 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                         )
                         final_fps = min(source_fps, TARGET_FPS)
                         total_duration = min(len(resized_frames) / final_fps, MAX_DURATION_SECONDS)
-                        clip = ImageSequenceClip(resized_frames, fps=final_fps).set_duration(
-                            total_duration
-                        )
+                        clip = ImageSequenceClip(resized_frames, fps=final_fps)
+                        clip.duration = total_duration
                         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_f:
                             temp_mp4_path = temp_f.name
 
@@ -813,6 +812,7 @@ async def napcat_get_bot_profile_for_core(
         f"{len(full_profile['groups'])} 个群聊的完整档案。"
     )
     return full_profile
+
 
 # 获取完整群成员列表的函数
 async def napcat_get_group_member_list(

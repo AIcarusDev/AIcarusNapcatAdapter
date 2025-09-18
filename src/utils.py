@@ -827,3 +827,35 @@ async def napcat_get_group_member_list(
     return await _call_napcat_api(
         server_connection, "get_group_member_list", params, timeout_seconds=45.0
     )
+
+async def napcat_add_friend(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
+    """主动添加好友,未实现."""
+    # user_id = kwargs.get("user_id")
+    # if not user_id:
+    #     logger.error("调用 napcat_add_friend 失败: 缺少 user_id 参数。")
+    #     return None
+
+    # params = {
+    #     "user_id": int(user_id),
+    #     "comment": kwargs.get("comment", "")  # 验证信息是可选的
+    # }
+    # 注意：这里的 action 名称 "add_friend" 必须与你在 NapCat 二次开发时添加的 Action 名称完全一致
+    # return await _call_napcat_api(server_connection, "add_friend", params)
+    raise NotImplementedError("主动添加好友功能未实现")
+
+
+
+async def napcat_join_group(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
+    """主动申请加入群聊."""
+    # group_id = kwargs.get("group_id")
+    # if not group_id:
+    #     logger.error("调用 napcat_join_group 失败: 缺少 group_id 参数。")
+    #     return None
+
+    # params = {
+    #     "group_id": str(group_id),  # NapCat 的加群接口需要字符串类型的群号
+    #     "comment": kwargs.get("comment", "")  # 验证信息是可选的
+    # }
+    # 注意：这里的 action 名称 "join_group" 必须与你在 NapCat 二次开发时添加的 Action 名称完全一致
+    # return await _call_napcat_api(server_connection, "join_group", params)
+    raise NotImplementedError("主动申请加入群聊功能未实现")

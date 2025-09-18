@@ -220,8 +220,10 @@ ActionMappingType = tuple[Callable[..., Awaitable[dict[str, Any] | None]], list[
 ACTION_MAPPING: dict[str, ActionMappingType] = {
     # --- 好友操作 ---
     "delete_friend": (utils.napcat_delete_friend, ["user_id"]),
+    # "add_friend": (utils.napcat_add_friend, ["user_id"]),
     # --- 群组管理 ---
     "kick_member": (utils.napcat_set_group_kick, ["group_id", "user_id"]),
+    # "join_group": (utils.napcat_join_group, ["group_id"]),
     "ban_member": (utils.napcat_set_group_ban, ["group_id", "user_id"]),
     "ban_all_members": (utils.napcat_set_group_whole_ban, ["group_id", "enable"]),
     "set_member_card": (utils.napcat_set_group_card, ["group_id", "user_id", "card"]),

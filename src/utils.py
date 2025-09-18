@@ -480,6 +480,13 @@ async def napcat_delete_friend(server_connection: Any, **kwargs: Any) -> dict[st
     }
     return await _call_napcat_api(server_connection, "delete_friend", params)
 
+async def napcat_set_friend_remark(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
+    """设置好友备注统一入口."""
+    params = {
+        "user_id": int(kwargs["user_id"]), "remark": kwargs.get("remark", "")
+    }
+    return await _call_napcat_api(server_connection, "set_friend_remark", params)
+
 
 async def napcat_set_group_kick(server_connection: Any, **kwargs: Any) -> dict[str, Any] | None:
     """踢出群成员的统一入口."""

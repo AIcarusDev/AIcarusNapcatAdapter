@@ -148,10 +148,15 @@ async def process_image_url_to_aicarus_seg(image_url: str, file_id: str | None =
                 )
 
         # 3. 保存到媒体缓存并获取哈希
-        content_type = await get_content_type_from_url(safe_url)
 
-        # 如果通过HEAD请求未能获取到Content-Type，尝试使用Pillow从文件内容中猜测
-        if not content_type and original_image_bytes:
+        # get_content_type_from_url方法被证明没有作用，qq永远返回400，而不是200
+        # 这里不再多一次请求尝试浪费时间
+        # content_type = await get_content_type_from_url(safe_url)
+
+        content_type = None
+
+        # 尝试使用Pillow从文件内容中猜测
+        if original_image_bytes:
             try:
                 with Image.open(io.BytesIO(original_image_bytes)) as img:
                     # Pillow的format属性通常是文件扩展名，需要映射到MIME类型
